@@ -14,7 +14,7 @@ composer require tinymvc/tinypdf
 ## Highlights
 
 - ⚡ **Zero Bloat for English/USA Documents**: English/Latin documents use standard built-in PDF core fonts with **0 KB font embedding overhead**, generating microscopic PDFs (~2 KB) in milliseconds.
-- 🌐 **Global Multilingual Support**: Supports custom `.ttf`, `.otf`, and `.ttc` fonts for **Bangla (বাংলা)**, Chinese (中文), Japanese (日本語), Korean (한국어), Arabic (العربية), Hindi, Cyrillic, and more.
+- 🌐 **Global Multilingual Support**: Supports custom `.ttf`, `.otf`, `.woff`, and `.ttc` fonts for **Bangla (বাংলা)**, Chinese (中文), Japanese (日本語), Korean (한국어), Arabic (العربية with RTL & cursive joining), Hindi (Devanagari), Cyrillic, and more.
 - 🇧🇩 **Bangla & Complex Script Shaping**: Built-in syllable analysis, pre-base vowel reordering (`ি`, `ে`, `ৈ`), two-part vowel splitting (`ো`, `ৌ`), Reph (`র্`), and conjunct ligatures (যুক্তবর্ণ - `ক্ত`, `ক্ষ`, `জ্ঞ`, `শ্চ`, `হ্ম`...).
 - 🀄 **CJK Line Breaking**: Native Unicode line breaking for Chinese, Japanese, and Korean text at character boundaries without requiring whitespace.
 - 🎨 **CSS `@font-face` & `$pdf->addFont()`**: Register custom fonts either directly in PHP or via standard CSS `@font-face` declarations in `<style>` blocks.
@@ -195,7 +195,8 @@ new HtmlPdf(
 | Method | Description |
 |---|---|
 | `addHtml(string $html, $format = null, ?string $orientation = null)` | Renders HTML starting on a new page. Chaining returns `$this`. |
-| `addFont(string $family, string $path, bool $bold = false, bool $italic = false)` | Registers a custom TrueType/OpenType (`.ttf`, `.otf`, `.ttc`) font family. |
+| `addFont(string $family, string $path, bool $bold = false, bool $italic = false)` | Registers a custom TrueType/OpenType/WOFF (`.ttf`, `.otf`, `.woff`, `.ttc`) font family. |
+| `addBookmark(string $title, int $level = 1, ?int $page = null, ?float $y = null)` | Appends an outline bookmark to the PDF document tree. |
 | `setBackgroundImage(string $src, float $opacity = 1.0)` | Sets a full-bleed page background image or watermark. |
 | `setTitle(string $title)` | Sets the PDF Title metadata. |
 | `setAuthor(string $author)` | Sets the PDF Author metadata. |
@@ -214,14 +215,14 @@ new HtmlPdf(
 
 | Area | Features Supported |
 |---|---|
-| **Typography** | `color`, `font-family`, `font-size`, `font-weight`, `font-style`, `text-align` (incl. justify), `text-decoration`, `text-transform`, `line-height`, `white-space: pre` |
-| **Multilingual** | **Bangla (বাংলা)**, Chinese (中文), Japanese (日本語), Korean (한국어), Arabic (العربية), Hindi, Cyrillic, and any custom `.ttf`/`.otf`/`.ttc` font |
-| **Layout** | **Flexbox** (`display: flex`, `flex-direction`, `justify-content`, `align-items`, `gap`, `flex: 1`), `display: inline-block`, `position: relative/absolute` (`top/right/bottom/left`), `page-break-before/after/inside` |
-| **Tables** | `table`, `thead`, `tbody`, `tfoot`, `tr`, `td`, `th`, **`rowspan`**, **`colspan`**, auto/percent widths, `border-collapse`, `cellpadding`, `cellspacing` |
-| **Graphics & Images** | `<img>` (JPEG, PNG with transparency, WebP, GIF, Data URIs), **`<svg>` elements**, **`.svg` images**, `border-radius` (circles, rounded photo frames) |
+| **Typography** | `color`, `font-family` (stacks & auto-fallback), `font-size`, `font-weight`, `font-style`, `text-align` (incl. justify), `text-decoration`, `text-transform`, `line-height`, `letter-spacing`, `word-spacing`, `word-break: break-all`, `overflow-wrap: break-word`, `white-space: pre` |
+| **Multilingual** | **Bangla (বাংলা)**, Chinese (中文), Japanese (日本語), Korean (한국어), Arabic (العربية RTL + harakat shaping), Hindi (Devanagari), and any custom `.ttf`/`.otf`/`.woff`/`.ttc` font |
+| **Page & Layout** | `@page` rules (size, orientation, margins), **Flexbox** (`display: flex`, `flex-direction`, `justify-content`, `align-items`, `gap`, `flex: 1`), `display: inline-block`, `position: relative/absolute` (`top/right/bottom/left`), `page-break-before/after/inside`, `min-width`, `max-width`, `max-height`, `direction: rtl/ltr` |
+| **Tables** | `table`, `colgroup`, `col`, `thead`, `tbody`, `tfoot` (standard section ordering), `tr`, `td`, `th`, **`rowspan`**, **`colspan`**, auto/percent widths, `border-collapse`, `cellpadding`, `cellspacing` |
+| **Graphics & Images** | `<img>` (JPEG, PNG with transparency, WebP, GIF, Data URIs), **`<svg>` elements**, **`.svg` images** (paths, shapes, matrix transforms), `border-radius` (circles, rounded photo frames) |
 | **Backgrounds** | `background-color`, **`background-image: url(...)`**, `background-repeat`, `background-position`, **`background-size: cover / contain`**, document watermarks |
-| **Interactive** | **`<a href="...">` clickable hyperlinks**, internal anchor jumps, PDF document outlines / bookmarks (`<h1>`-`<h6>`) |
-| **Styling & Box Model** | `margin` (incl. `auto`), `padding`, `border` (solid/dashed/dotted), `border-radius`, `box-sizing: border-box`, `opacity: 0.0-1.0`, `rgba(...)` with ExtGState |
+| **Interactive** | **`<a href="...">` clickable hyperlinks**, internal anchor jumps (`#id`), PDF document outlines / bookmarks (`<h1>`-`<h6>` and API) |
+| **Styling & Box Model** | `margin` (incl. `auto`), `padding`, `border` (solid/dashed/dotted), `border-radius`, `box-sizing: border-box`, `opacity: 0.0-1.0` (scoped state), `rgba(...)` with ExtGState |
 | **Units** | `px`, `pt`, `mm`, `cm`, `in`, `em`, `rem`, `%` |
 
 ---

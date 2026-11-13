@@ -25,13 +25,29 @@ final class TableEngine
      */
     public static function buildGrid(DOMElement $table, array $tableStyle, callable $computeStyle): array
     {
-        $rowsData = [];
         $occupied = []; // [rowIdx][colIdx] => true
         $maxCols = 0;
         $rowIdx = 0;
 
         $headRows = [];
+        $bodyRows = [];
         $footRows = [];
+        $colStyles = [];
+
+        // Check for <colgroup> and <col> elements for column styles / widths
+        foreach ($table->childNodes as $node) {
+            if (!$node instanceof DOMElement) continue;
+            $tag = strtolower($node->tagName);
+            if ($tag === 'colgroup') {
+                foreach ($node->childNodes as $col) {
+                    if ($col instanceof DOMElement && strtolower($col->tagName) === 'col') {
+                        $colStyles[] = $computeStyle($col, $tableStyle);
+                    }
+                }
+            } elseif ($tag === 'col') {
+                $colStyles[] = $computeStyle($node, $tableStyle);
+            }
+        }
 
         foreach ($table->childNodes as $section) {
             if (!$section instanceof DOMElement) continue;
@@ -73,6 +89,11 @@ final class TableEngine
                     $colspan = max(1, (int) $cell->getAttribute('colspan'));
                     $rowspan = max(1, (int) $cell->getAttribute('rowspan'));
 
+                    // If cell doesn't have an explicit width, inherit from <col>
+                    if ($cellStyle['width'] === null && isset($colStyles[$colIdx]['width'])) {
+                        $cellStyle['width'] = $colStyles[$colIdx]['width'];
+                    }
+
                     // Mark matrix occupancy for spanned slots
                     for ($r = 0; $r < $rowspan; $r++) {
                         for ($c = 0; $c < $colspan; $c++) {
@@ -100,13 +121,20 @@ final class TableEngine
                     'foot' => $isFoot,
                 ];
 
-                $rowsData[] = $rowEntry;
-                if ($isHead) $headRows[] = $rowEntry;
-                if ($isFoot) $footRows[] = $rowEntry;
+                if ($isHead) {
+                    $headRows[] = $rowEntry;
+                } elseif ($isFoot) {
+                    $footRows[] = $rowEntry;
+                } else {
+                    $bodyRows[] = $rowEntry;
+                }
 
                 $rowIdx++;
             }
         }
+
+        // Standard HTML table section ordering: <thead>, <tbody>, <tfoot>
+        $rowsData = array_merge($headRows, $bodyRows, $footRows);
 
         return [
             'rows' => $rowsData,

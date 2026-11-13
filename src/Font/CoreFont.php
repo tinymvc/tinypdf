@@ -54,10 +54,27 @@ final class CoreFont implements FontInterface
         return ($sum * $size) / 1000;
     }
 
+    public function supportsText(string $text): bool
+    {
+        if ($text === '') {
+            return true;
+        }
+        $converted = @mb_convert_encoding($text, 'Windows-1252', 'UTF-8');
+        if ($converted === false) {
+            return false;
+        }
+        // If converting back to UTF-8 matches the original, it is fully representable in Windows-1252
+        return mb_convert_encoding($converted, 'UTF-8', 'Windows-1252') === $text;
+    }
+
     public function encode(string $text): string
     {
         $win = mb_convert_encoding($text, 'Windows-1252', 'UTF-8');
-        return '(' . str_replace(['\\', '(', ')', "\r"], ['\\\\', '\\(', '\\)', '\\r'], $win) . ')';
+        return '(' . str_replace(
+            ['\\', '(', ')', "\r", "\n", "\t"],
+            ['\\\\', '\\(', '\\)', '\\r', '\\n', '\\t'],
+            $win
+        ) . ')';
     }
 
     public function getPdfFontObjects(int &$nextId, string $resName): array

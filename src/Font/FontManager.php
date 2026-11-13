@@ -41,67 +41,167 @@ final class FontManager
 
     /**
      * Resolves the appropriate font for given family, style, and text content.
+     * Supports font stacks (comma-separated), intelligent script fallback, and automatic system fonts.
      * If text is Latin and no custom font is requested, returns standard Type 1 core font (0 KB overhead).
      */
     public function getFont(string $family, bool $bold = false, bool $italic = false, string $text = ''): FontInterface
     {
-        $cleanFamily = strtolower(trim($family));
-
-        // 1. Direct match with user-registered custom font family
-        if (isset($this->customPaths[$cleanFamily])) {
-            $styleKey = ($bold ? 'b' : '') . ($italic ? 'i' : '');
-            $path = $this->customPaths[$cleanFamily][$styleKey]
-                ?? $this->customPaths[$cleanFamily]['']
-                ?? reset($this->customPaths[$cleanFamily]);
-            return $this->loadTrueType($cleanFamily, $path, $bold, $italic);
+        $candidates = array_filter(
+            array_map(static fn($f) => strtolower(trim($f, " \t\n\r\0\x0B'\"")), explode(',', $family)),
+            static fn($f) => $f !== ''
+        );
+        if (empty($candidates)) {
+            $candidates = ['helvetica'];
         }
 
-        // 2. Check if text contains non-Latin scripts (Bangla, Arabic, CJK, Devanagari, etc.)
-        $isNonLatin = (bool) preg_match('/[^\x00-\x7F\xA0-\xFF]/u', $text);
-        if ($isNonLatin) {
-            // If user has registered any custom font, use it as fallback
-            if (!empty($this->allCustomFonts)) {
-                // If text is Bengali and user registered a font with bangla/kalpurush in name, pick it
-                if (BengaliShaper::containsBengali($text)) {
-                    foreach ($this->allCustomFonts as $name => $path) {
-                        if (str_contains($name, 'bangla') || str_contains($name, 'kalpurush') || str_contains($name, 'solaiman')) {
-                            return $this->loadTrueType($name, $path, $bold, $italic);
-                        }
+        $styleKey = ($bold ? 'b' : '') . ($italic ? 'i' : '');
+        $firstCustomFont = null;
+
+        // 1. Iterate over candidate font families in the CSS font stack
+        foreach ($candidates as $cand) {
+            if (isset($this->customPaths[$cand])) {
+                $path = $this->customPaths[$cand][$styleKey]
+                    ?? $this->customPaths[$cand]['']
+                    ?? reset($this->customPaths[$cand]);
+                $font = $this->loadTrueType($cand, $path, $bold, $italic);
+                $firstCustomFont ??= $font;
+
+                // If text is empty or this font supports the glyphs, choose it
+                if ($text === '' || $font->supportsText($text)) {
+                    return $font;
+                }
+            } elseif ($this->isCoreFontFamily($cand)) {
+                $core = $this->loadCoreFont($cand, $bold, $italic);
+                if ($text === '' || $core->supportsText($text)) {
+                    return $core;
+                }
+            }
+        }
+
+        // If a font in the user's stack was found and text has no non-Latin script, return it
+        if ($firstCustomFont !== null && !self::isNonLatinText($text)) {
+            return $firstCustomFont;
+        }
+
+        // 2. Script-based routing across all registered custom fonts
+        if (!empty($this->allCustomFonts)) {
+            // Check if text is Bengali / Indic
+            if (BengaliShaper::containsBengali($text)) {
+                foreach ($this->allCustomFonts as $name => $path) {
+                    if (str_contains($name, 'bangla') || str_contains($name, 'kalpurush') || str_contains($name, 'solaiman')) {
+                        return $this->loadTrueType($name, $path, $bold, $italic);
                     }
                 }
-                // Otherwise use the first registered custom font
+            }
+
+            // Check if text is Arabic
+            if (ArabicShaper::containsArabic($text)) {
+                foreach ($this->allCustomFonts as $name => $path) {
+                    if (str_contains($name, 'arabic') || str_contains($name, 'amiri') || str_contains($name, 'scheherazade')) {
+                        return $this->loadTrueType($name, $path, $bold, $italic);
+                    }
+                }
+            }
+
+            // Check if any registered custom font supports the glyphs in this text
+            foreach ($this->allCustomFonts as $name => $path) {
+                $font = $this->loadTrueType($name, $path, $bold, $italic);
+                if ($font->supportsText($text)) {
+                    return $font;
+                }
+            }
+
+            // If non-Latin and user has registered fonts, use the first custom font
+            if (self::isNonLatinText($text)) {
                 $firstFamily = array_key_first($this->allCustomFonts);
                 return $this->loadTrueType($firstFamily, $this->allCustomFonts[$firstFamily], $bold, $italic);
             }
+        }
 
-            // Check if OS has system font as automatic convenience
+        // 3. System font discovery for non-Latin scripts as automatic convenience
+        if (self::isNonLatinText($text)) {
             $systemFont = $this->findSystemFont($text);
             if ($systemFont !== null) {
                 return $this->loadTrueType('sys_font', $systemFont, $bold, $italic);
             }
         }
 
-        // 3. Default to Standard Adobe Core Type 1 Fonts (Helvetica, Times, Courier)
+        // 4. Default to Standard Adobe Core Type 1 Fonts (Helvetica, Times, Courier)
         // Keeps PDF file size microscopic (~2KB) with zero font embedding overhead
-        return $this->loadCoreFont($cleanFamily, $bold, $italic);
+        $primaryFamily = $candidates[0] ?? 'helvetica';
+        return $this->loadCoreFont($primaryFamily, $bold, $italic);
+    }
+
+    private static function isNonLatinText(string $text): bool
+    {
+        if ($text === '') {
+            return false;
+        }
+        // Non-Latin Unicode scripts: Cyrillic, Hebrew, Arabic, Devanagari, Bengali, Gurmukhi,
+        // Gujarati, Oriya, Tamil, Telugu, Kannada, Malayalam, Thai, CJK, Hangul, etc.
+        return (bool) preg_match('/[\x{0400}-\x{04FF}\x{0590}-\x{05FF}\x{0600}-\x{06FF}\x{0750}-\x{077F}\x{0900}-\x{097F}\x{0980}-\x{09FF}\x{0A00}-\x{0A7F}\x{0A80}-\x{0AFF}\x{0B00}-\x{0B7F}\x{0B80}-\x{0BFF}\x{0C00}-\x{0C7F}\x{0C80}-\x{0CFF}\x{0D00}-\x{0D7F}\x{0E00}-\x{0E7F}\x{1000}-\x{109F}\x{3040}-\x{30FF}\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}\x{AC00}-\x{D7AF}]/u', $text);
+    }
+
+    private function isCoreFontFamily(string $family): bool
+    {
+        return (bool) preg_match('/^(helvetica|arial|sans-serif|times|georgia|garamond|palatino|serif|courier|mono|consolas|menlo|monospace)$/i', $family);
     }
 
     private function findSystemFont(string $text): ?string
     {
+        $paths = [];
+
         if (BengaliShaper::containsBengali($text)) {
-            if (is_file('C:/Windows/Fonts/kalpurush.ttf')) return 'C:/Windows/Fonts/kalpurush.ttf';
-            if (is_file('C:/Windows/Fonts/vrinda.ttf')) return 'C:/Windows/Fonts/vrinda.ttf';
+            $paths = [
+                // Windows
+                'C:/Windows/Fonts/kalpurush.ttf',
+                'C:/Windows/Fonts/vrinda.ttf',
+                // Linux
+                '/usr/share/fonts/truetype/lohit-bengali/Lohit-Bengali.ttf',
+                '/usr/share/fonts/truetype/noto/NotoSansBengali-Regular.ttf',
+                '/usr/share/fonts/google-noto/NotoSansBengali-Regular.ttf',
+            ];
+        } elseif (ArabicShaper::containsArabic($text)) {
+            $paths = [
+                // Windows
+                'C:/Windows/Fonts/arial.ttf',
+                'C:/Windows/Fonts/segoeui.ttf',
+                // Linux
+                '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+                '/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf',
+                // macOS
+                '/System/Library/Fonts/GeezaPro.ttc',
+            ];
+        } elseif (BengaliShaper::containsDevanagari($text)) {
+            $paths = [
+                // Windows
+                'C:/Windows/Fonts/mangal.ttf',
+                'C:/Windows/Fonts/nirmala.ttf',
+                // Linux
+                '/usr/share/fonts/truetype/lohit-devanagari/Lohit-Devanagari.ttf',
+                '/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf',
+            ];
+        } elseif (preg_match('/[\x{4E00}-\x{9FFF}\x{3040}-\x{30FF}\x{AC00}-\x{D7AF}]/u', $text)) {
+            $paths = [
+                // Windows
+                'C:/Windows/Fonts/msyh.ttc',
+                'C:/Windows/Fonts/simsun.ttc',
+                'C:/Windows/Fonts/YuGothR.ttc',
+                'C:/Windows/Fonts/malgun.ttf',
+                // Linux
+                '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+                '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
+                '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+                // macOS
+                '/System/Library/Fonts/PingFang.ttc',
+                '/Library/Fonts/Arial Unicode.ttf',
+            ];
         }
-        if (ArabicShaper::containsArabic($text)) {
-            if (is_file('C:/Windows/Fonts/arial.ttf')) return 'C:/Windows/Fonts/arial.ttf';
-            if (is_file('C:/Windows/Fonts/segoeui.ttf')) return 'C:/Windows/Fonts/segoeui.ttf';
-        }
-        // Chinese / Japanese / Korean
-        if (preg_match('/[\x{4E00}-\x{9FFF}\x{3040}-\x{30FF}\x{AC00}-\x{D7AF}]/u', $text)) {
-            if (is_file('C:/Windows/Fonts/msyh.ttc')) return 'C:/Windows/Fonts/msyh.ttc';
-            if (is_file('C:/Windows/Fonts/simsun.ttc')) return 'C:/Windows/Fonts/simsun.ttc';
-            if (is_file('C:/Windows/Fonts/YuGothR.ttc')) return 'C:/Windows/Fonts/YuGothR.ttc';
-            if (is_file('C:/Windows/Fonts/malgun.ttf')) return 'C:/Windows/Fonts/malgun.ttf';
+
+        foreach ($paths as $path) {
+            if (is_file($path)) {
+                return $path;
+            }
         }
         return null;
     }

@@ -189,7 +189,7 @@ final class SvgRenderer
     private static function parseTransform(string $transform): string
     {
         $ops = '';
-        if (preg_match_all('/(translate|scale|rotate)\(([^)]+)\)/i', $transform, $matches, PREG_SET_ORDER)) {
+        if (preg_match_all('/(translate|scale|rotate|matrix)\(([^)]+)\)/i', $transform, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
                 $type = strtolower($m[1]);
                 $args = preg_split('/[\s,]+/', trim($m[2]));
@@ -207,6 +207,12 @@ final class SvgRenderer
                     $cos = cos($rad);
                     $sin = sin($rad);
                     $ops .= sprintf("%.5F %.5F %.5F %.5F 0 0 cm\n", $cos, $sin, -$sin, $cos);
+                } elseif ($type === 'matrix' && count($args) >= 6) {
+                    $ops .= sprintf(
+                        "%.5F %.5F %.5F %.5F %.3F %.3F cm\n",
+                        (float) $args[0], (float) $args[1], (float) $args[2],
+                        (float) $args[3], (float) $args[4], (float) $args[5]
+                    );
                 }
             }
         }

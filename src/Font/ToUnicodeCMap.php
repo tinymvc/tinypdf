@@ -37,7 +37,17 @@ final class ToUnicodeCMap
             $stream .= count($chunk) . " beginbfchar\n";
             foreach ($chunk as $gid => $uni) {
                 $gidHex = sprintf('%04X', $gid);
-                $uniHex = is_int($uni) ? sprintf('%04X', $uni) : $uni;
+                if (is_int($uni)) {
+                    if ($uni > 0xFFFF) {
+                        $high = 0xD800 + (($uni - 0x10000) >> 10);
+                        $low = 0xDC00 + (($uni - 0x10000) & 0x3FF);
+                        $uniHex = sprintf('%04X%04X', $high, $low);
+                    } else {
+                        $uniHex = sprintf('%04X', $uni);
+                    }
+                } else {
+                    $uniHex = $uni;
+                }
                 $stream .= "<$gidHex> <$uniHex>\n";
             }
             $stream .= "endbfchar\n";

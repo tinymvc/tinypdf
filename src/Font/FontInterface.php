@@ -24,6 +24,9 @@ interface FontInterface
     /** Width of a string of text in points for given font size. */
     public function getTextWidth(string $text, float $size): float;
 
+    /** Checks whether this font can render the non-whitespace characters in the text. */
+    public function supportsText(string $text): bool;
+
     /**
      * Encodes text for PDF content stream.
      * For Type 1: single-byte string.

@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Spark\Pdf\Font;
 
 use RuntimeException;
+use function count;
+use function sprintf;
+use function strlen;
 
 /**
  * Universal TrueType / OpenType font parser and PDF CIDFontType2 / Type0 embedder.
@@ -54,13 +57,21 @@ final class TrueTypeFont implements FontInterface
 
     private function parse(): void
     {
-        // Detect TrueType Collection (.ttc)
         $magic = substr($this->data, 0, 4);
-        if ($magic === 'ttcf') {
-            $this->baseOffset = $this->readUint32(12);
-        } else {
-            $this->baseOffset = 0;
+
+        // Decompress WOFF 1.0 (wOFF) into standard sfnt font binary
+        if ($magic === 'wOFF') {
+            $this->data = $this->unpackWoff($this->data);
+            $magic = substr($this->data, 0, 4);
         }
+
+        // Extract standalone sfnt TrueType/OpenType from TTC collection (reduces memory & PDF size)
+        if ($magic === 'ttcf') {
+            $this->data = $this->extractTtcFont($this->data, 0);
+            $magic = substr($this->data, 0, 4);
+        }
+
+        $this->baseOffset = 0;
 
         $numTables = $this->readUint16($this->baseOffset + 4);
         $tables = [];
@@ -235,13 +246,22 @@ final class TrueTypeFont implements FontInterface
         for ($i = 0; $i < $lookupCount; $i++) {
             $lookupOff = $lookupListOffset + $this->readUint16($lookupListOffset + 2 + $i * 2);
             $type = $this->readUint16($lookupOff);
-            if ($type !== 4) {
-                continue;
-            }
             $subCount = $this->readUint16($lookupOff + 4);
-            for ($s = 0; $s < $subCount; $s++) {
-                $subOff = $lookupOff + $this->readUint16($lookupOff + 6 + $s * 2);
-                $this->parseLigatureSubtable($subOff);
+
+            if ($type === 4) { // Direct Ligature Substitution
+                for ($s = 0; $s < $subCount; $s++) {
+                    $subOff = $lookupOff + $this->readUint16($lookupOff + 6 + $s * 2);
+                    $this->parseLigatureSubtable($subOff);
+                }
+            } elseif ($type === 7) { // Extension Substitution (wraps lookups in modern fonts)
+                for ($s = 0; $s < $subCount; $s++) {
+                    $subOff = $lookupOff + $this->readUint16($lookupOff + 6 + $s * 2);
+                    $extType = $this->readUint16($subOff + 2);
+                    if ($extType === 4) {
+                        $extOffset = $this->readUint32($subOff + 4);
+                        $this->parseLigatureSubtable($subOff + $extOffset);
+                    }
+                }
             }
         }
     }
@@ -269,6 +289,9 @@ final class TrueTypeFont implements FontInterface
                 }
                 $this->ligatures[$firstGid][] = ['comps' => $comps, 'lig' => $ligGid];
             }
+
+            // Sort ligatures by number of components descending (longest match first)
+            usort($this->ligatures[$firstGid], static fn($a, $b) => count($b['comps']) <=> count($a['comps']));
         }
     }
 
@@ -407,6 +430,23 @@ final class TrueTypeFont implements FontInterface
         return ($totalUnits / $this->unitsPerEm) * $size;
     }
 
+    public function supportsText(string $text): bool
+    {
+        if ($text === '') {
+            return true;
+        }
+        foreach (mb_str_split($text) as $char) {
+            $cp = mb_ord($char);
+            if ($cp <= 32) {
+                continue;
+            }
+            if (!isset($this->cmap[$cp]) || $this->cmap[$cp] === 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public function encode(string $text): string
     {
         $gids = $this->shapeText($text);
@@ -421,15 +461,27 @@ final class TrueTypeFont implements FontInterface
     {
         $objects = [];
 
-        // 1. Font file stream (FontFile2)
+        // 1. Font file stream: /FontFile3 for OpenType CFF (OTTO), /FontFile2 for TrueType
+        $isCff = (substr($this->data, 0, 4) === 'OTTO');
         $fontFileId = ++$nextId;
         $compressedFont = gzcompress($this->data, 6);
-        $objects[$fontFileId] = sprintf(
-            "<< /Length %d /Length1 %d /Filter /FlateDecode >>\nstream\n%s\nendstream",
-            strlen($compressedFont),
-            strlen($this->data),
-            $compressedFont
-        );
+
+        if ($isCff) {
+            $objects[$fontFileId] = sprintf(
+                "<< /Length %d /Subtype /OpenType /Filter /FlateDecode >>\nstream\n%s\nendstream",
+                strlen($compressedFont),
+                $compressedFont
+            );
+            $fontFileRef = sprintf('/FontFile3 %d 0 R', $fontFileId);
+        } else {
+            $objects[$fontFileId] = sprintf(
+                "<< /Length %d /Length1 %d /Filter /FlateDecode >>\nstream\n%s\nendstream",
+                strlen($compressedFont),
+                strlen($this->data),
+                $compressedFont
+            );
+            $fontFileRef = sprintf('/FontFile2 %d 0 R', $fontFileId);
+        }
 
         // 2. Font descriptor
         $descId = ++$nextId;
@@ -446,24 +498,40 @@ final class TrueTypeFont implements FontInterface
         if ($this->italic) $flags |= 64;
 
         $objects[$descId] = sprintf(
-            "<< /Type /FontDescriptor /FontName /%s /Flags %d /FontBBox [%s] /Ascent %d /Descent %d /CapHeight %d /StemV 80 /FontFile2 %d 0 R >>",
+            "<< /Type /FontDescriptor /FontName /%s /Flags %d /FontBBox [%s] /Ascent %d /Descent %d /CapHeight %d /StemV 80 %s >>",
             $this->postScriptName,
             $flags,
             implode(' ', $bbox),
             $ascent,
             $descent,
             $ascent,
-            $fontFileId
+            $fontFileRef
         );
 
-        // 3. Widths table (/W)
-        $widthsList = '';
-        $maxGid = empty($this->usedGlyphs) ? 0 : max(array_keys($this->usedGlyphs));
-        for ($g = 0; $g <= $maxGid; $g++) {
-            $w = (int) round(($this->advanceWidths[$g] ?? 0) * $scale);
-            $widthsList .= "$w ";
+        // 3. Compact Widths table (/W) grouped by contiguous used glyph runs
+        $used = array_keys($this->usedGlyphs);
+        sort($used);
+        $wRuns = [];
+        $runStart = null;
+        $runWidths = [];
+
+        foreach ($used as $gid) {
+            $w = (int) round(($this->advanceWidths[$gid] ?? 0) * $scale);
+            if ($runStart === null) {
+                $runStart = $gid;
+                $runWidths = [$w];
+            } elseif ($gid === $runStart + count($runWidths)) {
+                $runWidths[] = $w;
+            } else {
+                $wRuns[] = sprintf('%d [ %s]', $runStart, implode(' ', $runWidths));
+                $runStart = $gid;
+                $runWidths = [$w];
+            }
         }
-        $widthsTable = "[ 0 [ $widthsList] ]";
+        if ($runStart !== null) {
+            $wRuns[] = sprintf('%d [ %s]', $runStart, implode(' ', $runWidths));
+        }
+        $widthsTable = '[ ' . implode(' ', $wRuns) . ' ]';
 
         // 4. Descendant Font (CIDFontType2)
         $cidFontId = ++$nextId;
@@ -494,6 +562,74 @@ final class TrueTypeFont implements FontInterface
         );
 
         return $objects;
+    }
+
+    private function unpackWoff(string $woff): string
+    {
+        $flavor = substr($woff, 4, 4);
+        $numTables = unpack('n', substr($woff, 12, 2))[1];
+        $header = $flavor . pack('nnnn', $numTables, 0, 0, 0);
+        $tableRecords = '';
+        $tableData = '';
+        $offset = 12 + $numTables * 16;
+
+        for ($i = 0; $i < $numTables; $i++) {
+            $recOff = 44 + $i * 20;
+            $tag = substr($woff, $recOff, 4);
+            $to = unpack('N', substr($woff, $recOff + 4, 4))[1];
+            $compLen = unpack('N', substr($woff, $recOff + 8, 4))[1];
+            $origLen = unpack('N', substr($woff, $recOff + 12, 4))[1];
+            $origSum = unpack('N', substr($woff, $recOff + 16, 4))[1];
+
+            $chunk = substr($woff, $to, $compLen);
+            $decompressed = $compLen < $origLen ? @gzuncompress($chunk) : $chunk;
+            if ($decompressed === false) {
+                throw new RuntimeException("Corrupted WOFF font table: $tag");
+            }
+
+            $padLen = (4 - (strlen($decompressed) % 4)) % 4;
+            $padded = $decompressed . str_repeat("\0", $padLen);
+
+            $tableRecords .= $tag . pack('NNN', $origSum, $offset, $origLen);
+            $tableData .= $padded;
+            $offset += strlen($padded);
+        }
+
+        return $header . $tableRecords . $tableData;
+    }
+
+    private function extractTtcFont(string $ttc, int $fontIndex = 0): string
+    {
+        $numFonts = unpack('N', substr($ttc, 8, 4))[1];
+        if ($fontIndex >= $numFonts) {
+            $fontIndex = 0;
+        }
+        $fontOffset = unpack('N', substr($ttc, 12 + $fontIndex * 4, 4))[1];
+        $sfntVer = substr($ttc, $fontOffset, 4);
+        $numTables = unpack('n', substr($ttc, $fontOffset + 4, 2))[1];
+        $header = $sfntVer . substr($ttc, $fontOffset + 4, 8);
+
+        $tableRecords = '';
+        $tableData = '';
+        $offset = 12 + $numTables * 16;
+
+        for ($i = 0; $i < $numTables; $i++) {
+            $recOff = $fontOffset + 12 + $i * 16;
+            $tag = substr($ttc, $recOff, 4);
+            $checksum = substr($ttc, $recOff + 4, 4);
+            $to = unpack('N', substr($ttc, $recOff + 8, 4))[1];
+            $tl = unpack('N', substr($ttc, $recOff + 12, 4))[1];
+
+            $chunk = substr($ttc, $to, $tl);
+            $padLen = (4 - (strlen($chunk) % 4)) % 4;
+            $padded = $chunk . str_repeat("\0", $padLen);
+
+            $tableRecords .= $tag . $checksum . pack('NN', $offset, $tl);
+            $tableData .= $padded;
+            $offset += strlen($padded);
+        }
+
+        return "$header$tableRecords$tableData";
     }
 
     private function readUint16(int $offset): int

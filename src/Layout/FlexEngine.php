@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spark\Pdf\Layout;
 
 use DOMElement;
+use function count;
 use function is_string;
 
 /**
@@ -164,8 +165,9 @@ final class FlexEngine
     ): array {
         $curY = $cy;
         $result = [];
+        $count = count($items);
 
-        foreach ($items as $item) {
+        foreach ($items as $idx => $item) {
             $w = $item['s']['width'] !== null
                 ? (is_string($item['s']['width']) && str_ends_with($item['s']['width'], '%')
                     ? ((float) $item['s']['width'] / 100) * $cw
@@ -189,7 +191,7 @@ final class FlexEngine
                 'h' => $h,
             ];
 
-            $curY += $h + $gap;
+            $curY += $h + ($idx + 1 < $count ? $gap : 0.0);
         }
 
         return ['items' => $result, 'totalH' => max(0.0, $curY - $cy)];

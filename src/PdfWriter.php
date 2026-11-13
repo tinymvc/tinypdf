@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spark\Pdf;
 
 use function count;
+use function is_array;
 use function sprintf;
 use function strlen;
 
@@ -96,12 +97,22 @@ final class PdfWriter
                 $annotId = ++$this->id;
                 [$lx, $ly, $lw, $lh] = $link['rect'];
                 $rectStr = sprintf('%.3F %.3F %.3F %.3F', $lx, $p['h'] - $ly - $lh, $lx + $lw, $p['h'] - $ly);
-                $uri = str_replace(['(', ')', '\\'], ['\\(', '\\)', '\\\\'], $link['url']);
-                $this->objects[$annotId] = sprintf(
-                    '<< /Type /Annot /Subtype /Link /Rect [%s] /Border [0 0 0] /A << /Type /Action /S /URI /URI (%s) >> >>',
-                    $rectStr,
-                    $uri
-                );
+                if (isset($link['dest']) && is_array($link['dest'])) {
+                    $targetPageId = $pageIds[$link['dest']['page']] ?? $pageId;
+                    $destStr = sprintf('%d 0 R /XYZ 0 %.3F null', $targetPageId, $link['dest']['y']);
+                    $this->objects[$annotId] = sprintf(
+                        '<< /Type /Annot /Subtype /Link /Rect [%s] /Border [0 0 0] /Dest [%s] >>',
+                        $rectStr,
+                        $destStr
+                    );
+                } else {
+                    $uri = str_replace(['(', ')', '\\'], ['\\(', '\\)', '\\\\'], $link['url']);
+                    $this->objects[$annotId] = sprintf(
+                        '<< /Type /Annot /Subtype /Link /Rect [%s] /Border [0 0 0] /A << /Type /Action /S /URI /URI (%s) >> >>',
+                        $rectStr,
+                        $uri
+                    );
+                }
                 $annotRefs[] = "$annotId 0 R";
             }
             $annotStr = !empty($annotRefs) ? ' /Annots [' . implode(' ', $annotRefs) . ']' : '';

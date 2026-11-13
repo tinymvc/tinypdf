@@ -132,7 +132,10 @@ final class HtmlPdf
         'table' => ['border-spacing' => '0'],
     ];
 
-    private const INHERITED = ['color', 'family', 'size', 'bold', 'italic', 'align', 'lh', 'under', 'strike', 'transform', 'list', 'pre'];
+    private const INHERITED = [
+        'color', 'family', 'size', 'bold', 'italic', 'align', 'lh', 'under', 'strike',
+        'transform', 'list', 'pre', 'direction', 'letter-spacing', 'word-spacing', 'wordBreak'
+    ];
 
     private const BORDER_NONE = ['w' => 0.0, 'c' => [0, 0, 0], 's' => 'none'];
 
@@ -142,12 +145,14 @@ final class HtmlPdf
         'margin' => [0.0, 0.0, 0.0, 0.0], 'mAutoL' => false, 'mAutoR' => false,
         'padding' => [0.0, 0.0, 0.0, 0.0],
         'border' => [self::BORDER_NONE, self::BORDER_NONE, self::BORDER_NONE, self::BORDER_NONE],
-        'radius' => 0.0, 'width' => null, 'height' => null, 'minHeight' => null, 'sizing' => 'content',
+        'radius' => 0.0, 'width' => null, 'minWidth' => null, 'maxWidth' => null,
+        'height' => null, 'minHeight' => null, 'maxHeight' => null, 'sizing' => 'content',
         'position' => 'static', 'pos' => [null, null, null, null],
         'breakBefore' => false, 'breakAfter' => false, 'breakInside' => true,
         'valign' => null, 'shift' => 0.0, 'spacing' => 0.0, 'collapse' => false,
         'flex-direction' => 'row', 'justify-content' => 'flex-start', 'align-items' => 'stretch',
         'gap' => 0.0, 'flex' => null, 'flex-grow' => null,
+        'direction' => 'ltr', 'letter-spacing' => 0.0, 'word-spacing' => 0.0, 'wordBreak' => 'normal',
     ];
 
     // ------------------------------------------------------------------ state
@@ -177,6 +182,8 @@ final class HtmlPdf
     private array $images = [];
     private array $imageCache = [];
     private array $info = [];
+    private array $bookmarks = [];
+    private array $anchors = [];
 
     private FontManager $fontManager;
     private GraphicState $graphicState;
@@ -264,18 +271,31 @@ final class HtmlPdf
         return $this;
     }
 
+    public function addBookmark(string $title, int $level = 1, ?int $page = null, ?float $y = null): static
+    {
+        $this->bookmarks[] = [
+            'title' => $title,
+            'page' => $page ?? max(0, count($this->pages) - 1),
+            'y' => $y ?? max(0.0, $this->pageH - ($this->y + $this->pending)),
+            'level' => max(1, $level),
+        ];
+        return $this;
+    }
+
     /**
      * Renders HTML document/fragment, starting on a new page.
      */
     public function addHtml(string $html, string|array|null $format = null, ?string $orientation = null): static
     {
         $this->finishPage();
-        $spec = $format ?? (count($this->formatSpec) === 1 ? $this->formatSpec[0] : $this->formatSpec);
-        $this->beginPage($this->pageSize($spec, $orientation ?? $this->orientationSpec));
 
         $doc = $this->parse($html);
         $this->styleCache = [];
         $this->rules = $this->collectRules($doc);
+
+        $spec = $format ?? (count($this->formatSpec) === 1 ? $this->formatSpec[0] : $this->formatSpec);
+        $this->beginPage($this->pageSize($spec, $orientation ?? $this->orientationSpec));
+
         $body = $doc->getElementsByTagName('body')->item(0);
         if (!$body instanceof DOMElement) {
             return $this;
@@ -340,6 +360,27 @@ final class HtmlPdf
         // Build ExtGState Resources
         $extGStateRes = $this->graphicState->getResourceDict($extraObjects, $id);
 
+        // Pass bookmarks to writer
+        foreach ($this->bookmarks as $bm) {
+            $writer->addBookmark($bm['title'], $bm['page'], $bm['y'], $bm['level']);
+        }
+
+        // Resolve internal anchors for link annotations
+        foreach ($this->pages as &$p) {
+            if (!empty($p['annots'])) {
+                foreach ($p['annots'] as &$annot) {
+                    if (str_starts_with($annot['url'], '#')) {
+                        $targetId = substr($annot['url'], 1);
+                        if (isset($this->anchors[$targetId])) {
+                            $annot['dest'] = $this->anchors[$targetId];
+                        }
+                    }
+                }
+                unset($annot);
+            }
+        }
+        unset($p);
+
         // Feed pages to writer
         foreach ($this->pages as $p) {
             $writer->addPage($p['w'], $p['h'], $p['ops'], $p['bg'], $p['annots'] ?? []);
@@ -395,7 +436,7 @@ final class HtmlPdf
         return array_map(static fn($v) => (float) $v * self::MM, $m);
     }
 
-    private function beginPage(array $mm): void
+    private function beginPage(array $mm, bool $keepFrames = false): void
     {
         $this->pageW = $mm[0] * self::MM;
         $this->pageH = $mm[1] * self::MM;
@@ -403,7 +444,9 @@ final class HtmlPdf
         $this->pageBottom = $this->pageH - $this->margin[2];
         $this->ops = [];
         $this->pageAnnots = [];
-        $this->frames = [];
+        if (!$keepFrames) {
+            $this->frames = [];
+        }
         $this->pageBg = null;
         $this->pageOpen = true;
         $this->y = $this->pageTop;
@@ -455,7 +498,7 @@ final class HtmlPdf
             }
         }
         $this->flushPage();
-        $this->beginPage([$this->pageW / self::MM, $this->pageH / self::MM]);
+        $this->beginPage([$this->pageW / self::MM, $this->pageH / self::MM], keepFrames: true);
     }
 
     private function forcePageBreak(): void
@@ -525,6 +568,39 @@ final class HtmlPdf
                             $this->fontManager->addFont($family, $path, $bold, $italic);
                         }
                     }
+                }
+            }
+        }
+
+        // Parse @page rules
+        if (preg_match('/@page\s*\{([^{}]*)\}/i', $css, $pageMatch)) {
+            $pageDecl = $this->parseDeclarations($pageMatch[1]);
+            if (isset($pageDecl['margin'])) {
+                $mTokens = $this->tokens($pageDecl['margin']);
+                $margins = [];
+                foreach ($mTokens as $tok) {
+                    $len = $this->length($tok, 12.0);
+                    if ($len !== null) $margins[] = (float) $len / self::PX;
+                }
+                if (!empty($margins)) {
+                    $this->margin = $this->parseMargin(count($margins) === 1 ? $margins[0] : $margins);
+                }
+            }
+            if (isset($pageDecl['size'])) {
+                $sizeTokens = $this->tokens($pageDecl['size']);
+                $fmt = null;
+                $orient = null;
+                foreach ($sizeTokens as $st) {
+                    $stl = strtolower($st);
+                    if (in_array($stl, ['portrait', 'landscape'], true)) {
+                        $orient = $stl === 'landscape' ? 'L' : 'P';
+                    } elseif (isset(self::FORMATS[strtoupper($st)])) {
+                        $fmt = $st;
+                    }
+                }
+                if ($fmt !== null || $orient !== null) {
+                    $this->formatSpec = [$fmt ?? 'A4'];
+                    $this->orientationSpec = $orient ?? $this->orientationSpec;
                 }
             }
         }
@@ -697,6 +773,11 @@ final class HtmlPdf
         $decl = array_replace($decl, $this->parseDeclarations($el->getAttribute('style')));
         $this->apply($s, $decl, $parent);
 
+        // In RTL mode, default text alignment is right unless explicitly overridden
+        if ($s['direction'] === 'rtl' && !isset($decl['text-align'])) {
+            $s['align'] = 'right';
+        }
+
         $this->styleCache[$key] = ['el' => $el, 's' => $s];
         return $s;
     }
@@ -706,6 +787,12 @@ final class HtmlPdf
         $d = [];
         $attr = static fn(string $name): string => trim($el->getAttribute($name));
         $px = static fn(string $v): string => ctype_digit($v) ? $v . 'px' : $v;
+
+        if (($v = strtolower($attr('dir'))) !== '') {
+            if ($v === 'rtl' || $v === 'ltr') {
+                $d['direction'] = $v;
+            }
+        }
 
         if (($v = $attr('width')) !== '' && in_array($tag, ['table', 'td', 'th', 'img', 'col', 'svg'], true)) {
             $d['width'] = $px($v);
@@ -984,14 +1071,41 @@ final class HtmlPdf
                 case 'border-radius':
                     $s['radius'] = $this->length($this->tokens($value)[0] ?? '0', $fs) ?? 0.0;
                     break;
+                case 'direction':
+                    if (in_array($l, ['ltr', 'rtl'], true)) {
+                        $s['direction'] = $l;
+                    }
+                    break;
+                case 'letter-spacing':
+                    $s['letter-spacing'] = (float) ($this->length($value, $fs) ?: 0.0);
+                    break;
+                case 'word-spacing':
+                    $s['word-spacing'] = (float) ($this->length($value, $fs) ?: 0.0);
+                    break;
+                case 'word-break':
+                case 'overflow-wrap':
+                case 'word-wrap':
+                    if (in_array($l, ['break-all', 'break-word', 'normal'], true)) {
+                        $s['wordBreak'] = $l;
+                    }
+                    break;
                 case 'width':
                     $s['width'] = $this->length($value, $fs);
+                    break;
+                case 'min-width':
+                    $s['minWidth'] = $this->length($value, $fs);
+                    break;
+                case 'max-width':
+                    $s['maxWidth'] = $this->length($value, $fs);
                     break;
                 case 'height':
                     $s['height'] = $this->length($value, $fs);
                     break;
                 case 'min-height':
                     $s['minHeight'] = $this->length($value, $fs);
+                    break;
+                case 'max-height':
+                    $s['maxHeight'] = $this->length($value, $fs);
                     break;
                 case 'box-sizing':
                     $s['sizing'] = $l === 'border-box' ? 'border' : 'content';
@@ -1232,6 +1346,24 @@ final class HtmlPdf
         }
 
         $tag = $this->tag($el);
+
+        // Record anchor for internal page links
+        if ($el->hasAttribute('id') && !$this->measuring) {
+            $id = $el->getAttribute('id');
+            $this->anchors[$id] = [
+                'page' => max(0, count($this->pages) - 1),
+                'y' => max(0.0, $this->pageH - ($this->y + $this->pending)),
+            ];
+        }
+
+        // Automatic PDF bookmarks for h1-h6 headings
+        if (preg_match('/^h([1-6])$/', $tag, $hm) && !$this->measuring) {
+            $hText = trim($el->textContent);
+            if ($hText !== '') {
+                $this->addBookmark($hText, (int) $hm[1]);
+            }
+        }
+
         if ($tag === 'img') {
             $this->renderImageBlock($el, $s, $x, $w);
         } elseif ($tag === 'svg') {
@@ -1277,6 +1409,13 @@ final class HtmlPdf
             }
         } else {
             $cw = max(0.0, $w - $ml - $mr - $extra);
+        }
+
+        if ($s['minWidth'] !== null) {
+            $cw = max($cw, $this->px($s['minWidth'], $w));
+        }
+        if ($s['maxWidth'] !== null) {
+            $cw = min($cw, $this->px($s['maxWidth'], $w));
         }
 
         $vertical = $pt + $pb + $bt + $bb;
@@ -1787,12 +1926,15 @@ final class HtmlPdf
     private function textItem(string $text, array $s, string $type): array
     {
         $font = $this->fontManager->getFont($s['family'], $s['bold'], $s['italic'], $text);
-        $w = $font->getTextWidth($text, $s['size']);
+        $letterSpacing = (float) ($s['letter-spacing'] ?? 0.0);
+        $charCount = mb_strlen($text);
+        $w = $font->getTextWidth($text, $s['size']) + ($letterSpacing * max(0, $charCount - 1));
         $link = !empty($this->activeLinks) ? end($this->activeLinks) : null;
 
         $key = implode('|', [
             $font->getName(), $s['size'], implode(',', $s['color']), (int) $s['under'], (int) $s['strike'],
             $s['bg'] === null ? '' : implode(',', $s['bg']), $s['shift'], $link ?? '',
+            $letterSpacing, $s['word-spacing'] ?? 0.0,
         ]);
         return ['t' => $type, 'x' => $text, 'w' => $w, 's' => $s, 'k' => $key, 'link' => $link];
     }
@@ -1839,7 +1981,26 @@ final class HtmlPdf
                 }
                 continue;
             }
+            $isBreakAll = ($it['s']['wordBreak'] ?? 'normal') === 'break-all';
             if ($cur && $curW + $it['w'] > $w + 0.01) {
+                if ($isBreakAll && $it['t'] === 'w') {
+                    $avail = max(0.0, $w - $curW);
+                    $pieces = $this->splitWord($it, $avail > 5.0 ? $avail : $w);
+                    if ($pieces) {
+                        $first = array_shift($pieces);
+                        $cur[] = $first;
+                        $curW += $first['w'];
+                        $push(false);
+                        foreach ($pieces as $piece) {
+                            if ($cur && $curW + $piece['w'] > $w + 0.01) {
+                                $push(false);
+                            }
+                            $cur[] = $piece;
+                            $curW += $piece['w'];
+                        }
+                        continue;
+                    }
+                }
                 $push(false);
             }
             if ($it['t'] === 'w' && $it['w'] > $w + 0.01) {
@@ -1958,10 +2119,11 @@ final class HtmlPdf
         $b = $base - $s['shift'];
         $out = '';
 
-        // Real opacity ExtGState if semi-transparent
-        if (($s['opacity'] ?? 1.0) < 0.999) {
+        // Scoped opacity ExtGState
+        $hasAlpha = (($s['opacity'] ?? 1.0) < 0.999);
+        if ($hasAlpha) {
             $gsName = $this->graphicState->getAlphaState((float) $s['opacity'], (float) $s['opacity']);
-            $out .= "/$gsName gs\n";
+            $out .= "q\n/$gsName gs\n";
         }
 
         // Inline background / Badge rendering
@@ -1980,6 +2142,10 @@ final class HtmlPdf
         }
         if ($s['strike']) {
             $out .= $this->fillOp($run['x'], $b - 0.3 * $size, $run['w'], $thickness, $s['color']);
+        }
+
+        if ($hasAlpha) {
+            $out .= "Q\n";
         }
 
         // Register clickable hyperlink
@@ -2164,9 +2330,10 @@ final class HtmlPdf
         $out = '';
         $radius = is_string($s['radius']) ? (float) $s['radius'] / 100 * min($w, $h) : (float) $s['radius'];
 
-        if (($s['opacity'] ?? 1.0) < 0.999) {
+        $hasAlpha = (($s['opacity'] ?? 1.0) < 0.999);
+        if ($hasAlpha) {
             $gsName = $this->graphicState->getAlphaState((float) $s['opacity'], (float) $s['opacity']);
-            $out .= "/$gsName gs\n";
+            $out .= "q\n/$gsName gs\n";
         }
 
         if ($s['bg'] !== null) {
@@ -2179,29 +2346,34 @@ final class HtmlPdf
         $uniform = $b[0]['w'] > 0 && $b[0] == $b[1] && $b[1] == $b[2] && $b[2] == $b[3];
         if ($radius > 0 && $uniform && !in_array(false, $sides, true)) {
             $bw = $b[0]['w'];
-            return $out . sprintf(
+            $out .= sprintf(
                 "q %s RG %s w %s %s S Q\n",
                 $this->rg($b[0]['c']), $this->n($bw), $this->dash($b[0]['s'], $bw),
                 $this->roundRect($x + $bw / 2, $y + $bw / 2, $w - $bw, $h - $bw, max(0.0, $radius - $bw / 2)),
             );
+        } else {
+            foreach ($b as $i => $side) {
+                $bw = $side['w'];
+                if ($bw <= 0 || !$sides[$i]) continue;
+                $o = $centered ? 0.0 : $bw / 2;
+                [$x1, $y1, $x2, $y2] = match ($i) {
+                    0 => [$x, $y + $o, $x + $w, $y + $o],
+                    1 => [$x + $w - $o, $y, $x + $w - $o, $y + $h],
+                    2 => [$x, $y + $h - $o, $x + $w, $y + $h - $o],
+                    default => [$x + $o, $y, $x + $o, $y + $h],
+                };
+                $out .= sprintf(
+                    "q %s RG %s w %s %s %s m %s %s l S Q\n",
+                    $this->rg($side['c']), $this->n($bw), $this->dash($side['s'], $bw),
+                    $this->n($x1), $this->n($this->pageH - $y1), $this->n($x2), $this->n($this->pageH - $y2),
+                );
+            }
         }
 
-        foreach ($b as $i => $side) {
-            $bw = $side['w'];
-            if ($bw <= 0 || !$sides[$i]) continue;
-            $o = $centered ? 0.0 : $bw / 2;
-            [$x1, $y1, $x2, $y2] = match ($i) {
-                0 => [$x, $y + $o, $x + $w, $y + $o],
-                1 => [$x + $w - $o, $y, $x + $w - $o, $y + $h],
-                2 => [$x, $y + $h - $o, $x + $w, $y + $h - $o],
-                default => [$x + $o, $y, $x + $o, $y + $h],
-            };
-            $out .= sprintf(
-                "q %s RG %s w %s %s %s m %s %s l S Q\n",
-                $this->rg($side['c']), $this->n($bw), $this->dash($side['s'], $bw),
-                $this->n($x1), $this->n($this->pageH - $y1), $this->n($x2), $this->n($this->pageH - $y2),
-            );
+        if ($hasAlpha) {
+            $out .= "Q\n";
         }
+
         return $out;
     }
 
@@ -2256,11 +2428,16 @@ final class HtmlPdf
         $font = $this->fontManager->getFont($s['family'], $s['bold'], $s['italic'], $text);
         $fontRes = $this->fontManager->getResourceName($font);
 
+        $charSpaceOp = ($s['letter-spacing'] ?? 0.0) != 0.0 ? $this->n($s['letter-spacing']) . ' Tc ' : '';
+        $effectiveWordSpace = $wordSpace > 0 ? $wordSpace : ($s['word-spacing'] ?? 0.0);
+        $wordSpaceOp = $effectiveWordSpace != 0.0 ? $this->n($effectiveWordSpace) . ' Tw ' : '';
+
         return sprintf(
-            "q BT /%s %s Tf %s rg %s %s Td %s%s Tj ET Q\n",
+            "q BT /%s %s Tf %s rg %s %s Td %s%s%s Tj ET Q\n",
             $fontRes, $this->n($s['size']), $this->rg($s['color']),
             $this->n($x), $this->n($this->pageH - $baseline),
-            $wordSpace > 0 ? $this->n($wordSpace) . ' Tw ' : '',
+            $charSpaceOp,
+            $wordSpaceOp,
             $font->encode($text),
         );
     }

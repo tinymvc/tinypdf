@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Spark\Pdf\Font;
 
+use function count;
+
 /**
  * Bengali (বাংলা) & Indic complex script shaper.
  * Handles syllable clustering, pre-base matra reordering (ি, ে, ৈ),
@@ -44,13 +46,24 @@ final class BengaliShaper
     }
 
     /**
-     * Shapes Bengali text for visual rendering.
+     * Checks if the text contains any Devanagari (Hindi, Sanskrit, Marathi) characters.
+     */
+    public static function containsDevanagari(string $text): bool
+    {
+        return (bool) preg_match('/[\x{0900}-\x{097F}]/u', $text);
+    }
+
+    /**
+     * Shapes Bengali or Devanagari text for visual rendering.
      * Reorders pre-base vowel signs and splits two-part vowels.
      *
      * @return list<string> sequence of Unicode characters / clusters ready for glyph mapping
      */
     public static function shape(string $text): array
     {
+        if (self::containsDevanagari($text)) {
+            return self::shapeDevanagari($text);
+        }
         if (!self::containsBengali($text)) {
             return mb_str_split($text);
         }
@@ -241,5 +254,66 @@ final class BengaliShaper
     {
         $code = mb_ord($char);
         return $code >= 0x0981 && $code <= 0x0983;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function shapeDevanagari(string $text): array
+    {
+        $chars = mb_str_split($text);
+        $count = count($chars);
+        $output = [];
+        $i = 0;
+
+        while ($i < $count) {
+            $char = $chars[$i];
+            $code = mb_ord($char);
+            if ($code < 0x0900 || $code > 0x097F) {
+                $output[] = $char;
+                $i++;
+                continue;
+            }
+
+            // Extract Devanagari syllable
+            $cluster = [];
+            while ($i < $count) {
+                $c = $chars[$i];
+                $cluster[] = $c;
+                $i++;
+                if ($i < $count && $chars[$i] === "\u{094D}") { // Halant
+                    $cluster[] = $chars[$i++];
+                    continue;
+                }
+                // Vowel signs or nukta
+                if ($i < $count && (mb_ord($chars[$i]) >= 0x093A && mb_ord($chars[$i]) <= 0x094F)) {
+                    $cluster[] = $chars[$i++];
+                }
+                // Modifiers (Anusvara, Visarga, Candrabindu)
+                while ($i < $count && (mb_ord($chars[$i]) >= 0x0901 && mb_ord($chars[$i]) <= 0x0903)) {
+                    $cluster[] = $chars[$i++];
+                }
+                break;
+            }
+
+            // Reorder pre-base vowel \u{093F} (ि)
+            $pre = null;
+            $rest = [];
+            foreach ($cluster as $c) {
+                if ($c === "\u{093F}") {
+                    $pre = $c;
+                } else {
+                    $rest[] = $c;
+                }
+            }
+            if ($pre !== null) {
+                $output[] = $pre;
+            }
+            foreach ($rest as $c) {
+                $output[] = $c;
+            }
+        }
+
+        return $output;
     }
 }

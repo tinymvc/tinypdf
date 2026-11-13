@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Spark\Pdf\Font;
 
+use function count;
+
 /**
  * Arabic, Persian & Urdu cursive script shaper and bidirectional (BiDi) reorderer.
  * Maps letters to Isolated, Initial, Medial, and Final presentation forms.
@@ -55,6 +57,11 @@ final class ArabicShaper
         return (bool) preg_match('/[\x{0600}-\x{06FF}\x{0750}-\x{077F}\x{FB50}-\x{FDFF}\x{FE70}-\x{FEFF}]/u', $text);
     }
 
+    public static function isDiacritic(int $code): bool
+    {
+        return ($code >= 0x064B && $code <= 0x065F) || $code === 0x0670;
+    }
+
     /**
      * Shapes Arabic letters to their contextual cursive presentation forms.
      */
@@ -71,15 +78,32 @@ final class ArabicShaper
 
         for ($i = 0; $i < $count; $i++) {
             $code = $codes[$i];
+            if (self::isDiacritic($code)) {
+                $shaped[] = $chars[$i];
+                continue;
+            }
             if (!isset(self::FORMS[$code])) {
                 $shaped[] = $chars[$i];
                 continue;
             }
 
+            // Find next non-diacritic letter
+            $nextIdx = $i + 1;
+            while ($nextIdx < $count && self::isDiacritic($codes[$nextIdx])) {
+                $nextIdx++;
+            }
+            $nextCode = $nextIdx < $count ? $codes[$nextIdx] : null;
+
+            // Find previous non-diacritic letter
+            $prevIdx = $i - 1;
+            while ($prevIdx >= 0 && self::isDiacritic($codes[$prevIdx])) {
+                $prevIdx--;
+            }
+            $prevCode = $prevIdx >= 0 ? $codes[$prevIdx] : null;
+
             // Check Lam-Alif ligatures: LAM (0x0644) + ALEF variants
-            if ($code === 0x0644 && $i + 1 < $count) {
-                $next = $codes[$i + 1];
-                $lamAlif = match ($next) {
+            if ($code === 0x0644 && $nextCode !== null) {
+                $lamAlif = match ($nextCode) {
                     0x0622 => 0xFEF5, // MADDA
                     0x0623 => 0xFEF7, // HAMZA ABOVE
                     0x0625 => 0xFEF9, // HAMZA BELOW
@@ -87,16 +111,20 @@ final class ArabicShaper
                     default => null,
                 };
                 if ($lamAlif !== null) {
-                    $prevConnects = ($i > 0) && self::connectsRight($codes[$i - 1]);
+                    $prevConnects = ($prevCode !== null) && self::connectsRight($prevCode);
                     $finalForm = $prevConnects ? ($lamAlif + 1) : $lamAlif;
                     $shaped[] = mb_chr($finalForm);
-                    $i++; // skip Alif
+                    // Copy any intermediate diacritics between Lam and Alif
+                    for ($d = $i + 1; $d < $nextIdx; $d++) {
+                        $shaped[] = $chars[$d];
+                    }
+                    $i = $nextIdx; // skip past Alif
                     continue;
                 }
             }
 
-            $prevConnects = ($i > 0) && self::connectsRight($codes[$i - 1]);
-            $nextConnects = ($i + 1 < $count) && self::connectsLeft($codes[$i + 1]);
+            $prevConnects = ($prevCode !== null) && self::connectsRight($prevCode);
+            $nextConnects = ($nextCode !== null) && self::connectsLeft($nextCode);
 
             $form = self::FORMS[$code];
             $target = null;
@@ -119,7 +147,7 @@ final class ArabicShaper
 
     private static function connectsLeft(int $code): bool
     {
-        return isset(self::FORMS[$code]);
+        return isset(self::FORMS[$code]) && (self::FORMS[$code][1] !== null || self::FORMS[$code][3] !== null);
     }
 
     private static function connectsRight(int $code): bool
@@ -128,7 +156,7 @@ final class ArabicShaper
     }
 
     /**
-     * Simple BiDi visual reordering for RTL text runs.
+     * Simple BiDi visual reordering for RTL text runs, preserving LTR digits.
      */
     public static function bidiReorder(string $text): string
     {
@@ -158,12 +186,29 @@ final class ArabicShaper
         $out = '';
         foreach ($runs as $run) {
             if ($run['rtl']) {
-                $out .= implode('', array_reverse(mb_str_split($run['text'])));
+                $out .= self::reverseRtlPreservingDigits($run['text']);
             } else {
                 $out .= $run['text'];
             }
         }
 
         return $out;
+    }
+
+    private static function reverseRtlPreservingDigits(string $rtlText): string
+    {
+        // Tokenize into digit sequences and individual non-digit characters
+        $parts = preg_split('/([\d\x{0660}-\x{0669}\x{06F0}-\x{06F9}]+)/u', $rtlText, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY) ?: [];
+        $reversed = [];
+        for ($k = count($parts) - 1; $k >= 0; $k--) {
+            $part = $parts[$k];
+            // If digit run, preserve Left-to-Right order
+            if (preg_match('/^[\d\x{0660}-\x{0669}\x{06F0}-\x{06F9}]+$/u', $part)) {
+                $reversed[] = $part;
+            } else {
+                $reversed[] = implode('', array_reverse(mb_str_split($part)));
+            }
+        }
+        return implode('', $reversed);
     }
 }

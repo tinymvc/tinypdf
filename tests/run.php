@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-require __DIR__ . '/../src/HtmlPdf.php';
+require __DIR__ . '/../vendor/autoload.php';
 
 error_reporting(E_ALL);
 set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
