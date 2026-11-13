@@ -218,3 +218,92 @@ HTML;
     check(str_contains($decomp, "/GS1 gs\n"), 'Opacity gs must be emitted');
     check(str_contains($decomp, "Q\n"), 'ExtGState must be restored with Q');
 });
+
+test('HtmlPdf supports custom format [w, h], string (w, h), 80x100 and units', function () {
+    // Array [80, 100] mm
+    $pdf1 = new HtmlPdf([80, 100]);
+    $pdf1->addHtml('<p>Array format</p>');
+    $b1 = $pdf1->output();
+    check(str_contains($b1, '/MediaBox [0 0 226.772 283.465]'), 'Array [80, 100] must produce 226.772 x 283.465 pt');
+
+    // Tuple string '(80, 100)'
+    $pdf2 = new HtmlPdf('(80, 100)');
+    $pdf2->addHtml('<p>Tuple string format</p>');
+    $b2 = $pdf2->output();
+    check(str_contains($b2, '/MediaBox [0 0 226.772 283.465]'), 'Tuple string (80, 100) must produce 226.772 x 283.465 pt');
+
+    // String '80x100'
+    $pdf3 = new HtmlPdf('80x100');
+    $pdf3->addHtml('<p>80x100 format</p>');
+    $b3 = $pdf3->output();
+    check(str_contains($b3, '/MediaBox [0 0 226.772 283.465]'), '80x100 must produce 226.772 x 283.465 pt');
+
+    // String with units '4in 6in'
+    $pdf4 = new HtmlPdf('4in 6in');
+    $pdf4->addHtml('<p>Inches format</p>');
+    $b4 = $pdf4->output();
+    // 4in = 288pt, 6in = 432pt
+    check(str_contains($b4, '/MediaBox [0 0 288.000 432.000]'), '4in 6in must produce 288 x 432 pt');
+});
+
+test('HtmlPdf preserves custom format when @page { size: landscape; } is used', function () {
+    $pdf = new HtmlPdf([80, 100]);
+    $html = <<<'HTML'
+    <style>
+      @page {
+        size: landscape;
+      }
+    </style>
+    <p>Landscape on custom format</p>
+HTML;
+    $pdf->addHtml($html);
+    $bytes = $pdf->output();
+
+    // 100mm x 80mm in points is 283.465 x 226.772
+    check(str_contains($bytes, '/MediaBox [0 0 283.465 226.772]'), 'Must keep 80x100 custom format and orient landscape (283.465 x 226.772 pt)');
+});
+
+test('HtmlPdf parses custom length dimensions in @page CSS rule', function () {
+    $pdf = new HtmlPdf('A4');
+    $html = <<<'HTML'
+    <style>
+      @page {
+        size: 100mm 150mm;
+        margin: 10mm;
+      }
+    </style>
+    <p>100x150 mm custom page via CSS</p>
+HTML;
+    $pdf->addHtml($html);
+    $bytes = $pdf->output();
+
+    // 100mm x 150mm in points is 283.465 x 425.197
+    check(str_contains($bytes, '/MediaBox [0 0 283.465 425.197]'), 'Must produce 100x150 mm (283.465 x 425.197 pt) from @page size');
+});
+
+test('HtmlPdf supports per-document custom format in multi-page flow', function () {
+    $pdf = new HtmlPdf('A4');
+    $pdf->addHtml('<h1>Page 1 is A4</h1>');
+    $pdf->addHtml('<h1>Page 2 is custom receipt</h1>', [80, 120]);
+    $bytes = $pdf->output();
+
+    check(str_contains($bytes, '/MediaBox [0 0 595.276 841.890]'), 'First page must be A4');
+    check(str_contains($bytes, '/MediaBox [0 0 226.772 340.157]'), 'Second page must be 80x120 mm');
+});
+
+test('HtmlPdf supports setHeaderHtml and setFooterHtml with dynamic page tokens', function () {
+    $pdf = new HtmlPdf('A4', margin: [20, 15, 20, 15]);
+    $pdf->setHeaderHtml('<div style="font-size: 8pt; color: #475569; text-align: right;">Document Header &bull; Page {page} of {pages}</div>');
+    $pdf->setFooterHtml('<div style="font-size: 8pt; color: #94a3b8; text-align: center;">Confidential &bull; Page {page} / {pages}</div>');
+    $pdf->addHtml('<h1>Page One Content</h1>');
+    $pdf->addHtml('<h1>Page Two Content</h1>');
+    $bytes = $pdf->output();
+
+    $decomp = getDecompressedStreams($bytes);
+    check(str_contains($decomp, 'Document Header'), 'Header HTML text must be rendered');
+    check(str_contains($decomp, 'Page 1 of 2'), 'Header page token {page} of {pages} must be rendered on page 1');
+    check(str_contains($decomp, 'Page 2 of 2'), 'Header page token {page} of {pages} must be rendered on page 2');
+    check(str_contains($decomp, 'Confidential'), 'Footer HTML text must be rendered');
+    check(str_contains($decomp, 'Page 1 / 2'), 'Footer page token {page} / {pages} must be rendered on page 1');
+    check(str_contains($decomp, 'Page 2 / 2'), 'Footer page token {page} / {pages} must be rendered on page 2');
+});

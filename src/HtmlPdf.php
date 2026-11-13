@@ -294,6 +294,12 @@ final class HtmlPdf
         $this->rules = $this->collectRules($doc);
 
         $spec = $format ?? (count($this->formatSpec) === 1 ? $this->formatSpec[0] : $this->formatSpec);
+        if ($format !== null) {
+            $this->formatSpec = is_array($format) ? array_values($format) : [$format];
+        }
+        if ($orientation !== null) {
+            $this->orientationSpec = $orientation;
+        }
         $this->beginPage($this->pageSize($spec, $orientation ?? $this->orientationSpec));
 
         $body = $doc->getElementsByTagName('body')->item(0);
@@ -322,7 +328,7 @@ final class HtmlPdf
             $this->flushPage();
             $this->pageOpen = false;
         }
-        $this->addFooters();
+        $this->addHeadersAndFooters();
 
         $writer = new PdfWriter();
         foreach ($this->info as $k => $v) {
@@ -407,18 +413,75 @@ final class HtmlPdf
 
     // ------------------------------------------------------------ page setup
 
+    private function toMm(float|int|string $val): ?float
+    {
+        if (is_numeric($val)) {
+            return (float) $val;
+        }
+        $v = strtolower(trim((string) $val));
+        if (!preg_match('/^(-?[\d.]+)\s*(px|pt|mm|cm|in)?$/', $v, $m)) {
+            return null;
+        }
+        $n = (float) $m[1];
+        return match ($m[2] ?? 'mm') {
+            'pt' => round($n / self::MM, 4),
+            'mm' => $n,
+            'cm' => $n * 10.0,
+            'in' => round($n * 25.4, 4),
+            'px' => round(($n * self::PX) / self::MM, 4),
+            default => $n,
+        };
+    }
+
     private function pageSize(string|array $format, string $orientation): array
     {
-        if (is_array($format) && count($format) === 1) {
-            $format = $format[0];
-        }
         if (is_array($format)) {
-            [$w, $h] = array_values($format);
-        } else {
-            [$w, $h] = self::FORMATS[strtoupper($format)]
-                ?? throw new InvalidArgumentException("Unknown page format '$format'");
+            $vals = array_values($format);
+            if (count($vals) >= 2) {
+                $w = $this->toMm($vals[0]);
+                $h = $this->toMm($vals[1]);
+                if ($w !== null && $h !== null) {
+                    if (strtoupper($orientation) === 'L' && $w < $h) {
+                        [$w, $h] = [$h, $w];
+                    } elseif (strtoupper($orientation) === 'P' && $w > $h) {
+                        [$w, $h] = [$h, $w];
+                    }
+                    return [(float) $w, (float) $h];
+                }
+            } elseif (count($vals) === 1) {
+                $format = $vals[0];
+            }
         }
+
+        if (is_string($format)) {
+            $clean = trim($format, "()[] \t\r\n");
+            if (isset(self::FORMATS[strtoupper($clean)])) {
+                [$w, $h] = self::FORMATS[strtoupper($clean)];
+            } else {
+                $parts = preg_split('/[\s,]+/', $clean);
+                if ($parts !== false && count($parts) === 2) {
+                    $w = $this->toMm($parts[0]);
+                    $h = $this->toMm($parts[1]);
+                } elseif (preg_match('/^([\d.]+(?:mm|pt|cm|in|px)?)\s*[x*]\s*([\d.]+(?:mm|pt|cm|in|px)?)$/i', $clean, $m)) {
+                    $w = $this->toMm($m[1]);
+                    $h = $this->toMm($m[2]);
+                } elseif (($single = $this->toMm($clean)) !== null) {
+                    $w = $single;
+                    $h = $single;
+                } else {
+                    throw new InvalidArgumentException("Unknown page format '$format'");
+                }
+                if ($w === null || $h === null) {
+                    throw new InvalidArgumentException("Unknown page format '$format'");
+                }
+            }
+        } else {
+            throw new InvalidArgumentException("Unknown page format");
+        }
+
         if (strtoupper($orientation) === 'L' && $w < $h) {
+            [$w, $h] = [$h, $w];
+        } elseif (strtoupper($orientation) === 'P' && $w > $h) {
             [$w, $h] = [$h, $w];
         }
         return [(float) $w, (float) $h];
@@ -508,27 +571,95 @@ final class HtmlPdf
         }
     }
 
-    private function addFooters(): void
+    private function addHeadersAndFooters(): void
     {
-        if ($this->footer === null || $this->footer === '') {
-            return;
-        }
         $total = count($this->pages);
         $font = $this->fontManager->getFont('helvetica', false, false);
         $resName = $this->fontManager->getResourceName($font);
 
-        foreach ($this->pages as $i => $page) {
-            $text = str_replace(['{page}', '{pages}'], [(string) ($i + 1), (string) $total], $this->footer);
-            $w = $font->getTextWidth($text, 8.0);
-            $x = ($page['w'] - $w) / 2;
-            $y = $page['h'] - $this->margin[2] / 2 + 3;
+        foreach ($this->pages as $i => &$page) {
+            $isFirst = ($i === 0);
+            if ($isFirst && $this->excludeHeaderFooterFirstPage) {
+                continue;
+            }
 
-            $op = sprintf(
-                "q BT /%s 8 rg 0.43 0.43 0.43 rg %.3F %.3F Td %s Tj ET Q\n",
-                $resName, $x, $page['h'] - $y, $font->encode($text)
-            );
-            $this->pages[$i]['ops'][] = $op;
+            // Simple text footer
+            if ($this->footer !== null && $this->footer !== '') {
+                $text = str_replace(['{page}', '{pages}'], [(string) ($i + 1), (string) $total], $this->footer);
+                $w = $font->getTextWidth($text, 8.0);
+                $x = ($page['w'] - $w) / 2;
+                $y = $page['h'] - $this->margin[2] / 2 + 3;
+
+                $op = sprintf(
+                    "q BT /%s 8 rg 0.43 0.43 0.43 rg %.3F %.3F Td %s Tj ET Q\n",
+                    $resName, $x, $page['h'] - $y, $font->encode($text)
+                );
+                $page['ops'][] = $op;
+            }
+
+            // HTML Header
+            if ($this->headerHtml !== null && $this->headerHtml !== '') {
+                $hHtml = str_replace(['{page}', '{pages}'], [(string) ($i + 1), (string) $total], $this->headerHtml);
+                $headerY = max(0.0, ($this->margin[0] / 2) - 4.0 * self::MM);
+                $ops = $this->renderIsolatedHtml($hHtml, $page['w'], $page['h'], $this->margin[3], $headerY, $page['w'] - $this->margin[1] - $this->margin[3]);
+                if (!empty($ops)) {
+                    array_unshift($page['ops'], ...$ops);
+                }
+            }
+
+            // HTML Footer
+            if ($this->footerHtml !== null && $this->footerHtml !== '') {
+                $fHtml = str_replace(['{page}', '{pages}'], [(string) ($i + 1), (string) $total], $this->footerHtml);
+                $footerY = $page['h'] - ($this->margin[2] / 2) - 4.0 * self::MM;
+                $ops = $this->renderIsolatedHtml($fHtml, $page['w'], $page['h'], $this->margin[3], $footerY, $page['w'] - $this->margin[1] - $this->margin[3]);
+                if (!empty($ops)) {
+                    $page['ops'] = [...$page['ops'], ...$ops];
+                }
+            }
         }
+        unset($page);
+    }
+
+    private function renderIsolatedHtml(string $html, float $pageW, float $pageH, float $x, float $y, float $maxW): array
+    {
+        $savedOps = $this->ops;
+        $savedY = $this->y;
+        $savedPageW = $this->pageW;
+        $savedPageH = $this->pageH;
+        $savedPageTop = $this->pageTop;
+        $savedPageBottom = $this->pageBottom;
+        $savedAllowBreak = $this->allowBreak;
+        $savedRules = $this->rules;
+
+        $this->ops = [];
+        $this->y = $y;
+        $this->pageW = $pageW;
+        $this->pageH = $pageH;
+        $this->pageTop = $y;
+        $this->pageBottom = $pageH;
+        $this->allowBreak = false;
+
+        $doc = $this->parse($html);
+        $this->rules = $this->collectRules($doc);
+
+        $body = $doc->getElementsByTagName('body')->item(0);
+        if ($body instanceof DOMElement) {
+            $style = $this->computeStyle($body, $this->rootStyle());
+            $this->renderBox($body, $style, $x, $maxW);
+        }
+
+        $resultOps = $this->ops;
+
+        $this->ops = $savedOps;
+        $this->y = $savedY;
+        $this->pageW = $savedPageW;
+        $this->pageH = $savedPageH;
+        $this->pageTop = $savedPageTop;
+        $this->pageBottom = $savedPageBottom;
+        $this->allowBreak = $savedAllowBreak;
+        $this->rules = $savedRules;
+
+        return $resultOps;
     }
 
     // ---------------------------------------------------------------- parsing
@@ -587,20 +718,35 @@ final class HtmlPdf
                 }
             }
             if (isset($pageDecl['size'])) {
-                $sizeTokens = $this->tokens($pageDecl['size']);
+                $sizeVal = trim($pageDecl['size'], "() \t\r\n");
+                $sizeTokens = $this->tokens($sizeVal);
                 $fmt = null;
                 $orient = null;
+                $customDims = [];
                 foreach ($sizeTokens as $st) {
                     $stl = strtolower($st);
-                    if (in_array($stl, ['portrait', 'landscape'], true)) {
-                        $orient = $stl === 'landscape' ? 'L' : 'P';
+                    if ($stl === 'landscape') {
+                        $orient = 'L';
+                    } elseif ($stl === 'portrait') {
+                        $orient = 'P';
                     } elseif (isset(self::FORMATS[strtoupper($st)])) {
                         $fmt = $st;
+                    } else {
+                        $dim = $this->toMm($st);
+                        if ($dim !== null) {
+                            $customDims[] = $dim;
+                        }
                     }
                 }
-                if ($fmt !== null || $orient !== null) {
-                    $this->formatSpec = [$fmt ?? 'A4'];
-                    $this->orientationSpec = $orient ?? $this->orientationSpec;
+                if (count($customDims) === 2) {
+                    $this->formatSpec = [$customDims[0], $customDims[1]];
+                } elseif (count($customDims) === 1) {
+                    $this->formatSpec = [$customDims[0], $customDims[0]];
+                } elseif ($fmt !== null) {
+                    $this->formatSpec = [$fmt];
+                }
+                if ($orient !== null) {
+                    $this->orientationSpec = $orient;
                 }
             }
         }

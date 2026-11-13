@@ -179,7 +179,7 @@ $pdf->addHtml($html)->save('invoice.pdf');
 
 ```php
 new HtmlPdf(
-    string|array $format = 'A4',      // 'A3', 'A4', 'A5', 'A6', 'Letter', 'Legal', 'Card' or [width, height] in mm
+    string|array $format = 'A4',      // 'A3', 'A4', 'A5', 'A6', 'Letter', 'Legal', 'Card' or custom [w, h], '(w, h)', '80x120', '4in 6in'
     string $orientation = 'P',        // 'P' (portrait) or 'L' (landscape)
     float|array $margin = 10,         // mm: one value, [vertical, horizontal] or [top, right, bottom, left]
     float $fontSize = 10,             // default font size in pt
@@ -202,8 +202,8 @@ new HtmlPdf(
 | `setAuthor(string $author)` | Sets the PDF Author metadata. |
 | `setSubject(string $subject)` | Sets the PDF Subject metadata. |
 | `setFooter(?string $footer)` | Sets footer text on every page (`{page}` and `{pages}` replaced). |
-| `setHeaderHtml(?string $html)` | Sets dynamic HTML header on every page. |
-| `setFooterHtml(?string $html)` | Sets dynamic HTML footer on every page. |
+| `setHeaderHtml(?string $html, bool $excludeFirstPage = false)` | Sets dynamic HTML header on every page (`{page}` and `{pages}` supported). |
+| `setFooterHtml(?string $html, bool $excludeFirstPage = false)` | Sets dynamic HTML footer on every page (`{page}` and `{pages}` supported). |
 | `setBasePath(?string $path)` | Base directory for relative image and font paths. |
 | `output(): string` | Compiles and returns raw PDF binary string. |
 | `save(string $path)` | Writes the generated PDF to a file. |
