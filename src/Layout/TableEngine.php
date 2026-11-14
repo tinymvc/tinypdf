@@ -36,7 +36,8 @@ final class TableEngine
 
         // Check for <colgroup> and <col> elements for column styles / widths
         foreach ($table->childNodes as $node) {
-            if (!$node instanceof DOMElement) continue;
+            if (!$node instanceof DOMElement)
+                continue;
             $tag = strtolower($node->tagName);
             if ($tag === 'colgroup') {
                 foreach ($node->childNodes as $col) {
@@ -49,16 +50,27 @@ final class TableEngine
             }
         }
 
-        foreach ($table->childNodes as $section) {
-            if (!$section instanceof DOMElement) continue;
+        $sections = [];
+        foreach ($table->childNodes as $node) {
+            if ($node instanceof DOMElement)
+                $sections[] = $node;
+        }
+        $rank = static fn(DOMElement $node): int => match (strtolower($node->tagName)) {
+            'thead' => 0, 'tfoot' => 2, default => 1,
+        };
+        usort($sections, static fn(DOMElement $a, DOMElement $b): int => $rank($a) <=> $rank($b));
+        foreach ($sections as $sectionIndex => $section) {
             $secTag = strtolower($section->tagName);
             $isHead = $secTag === 'thead';
             $isFoot = $secTag === 'tfoot';
 
             $trElements = $secTag === 'tr' ? [$section] : [];
+            $secStyle = $tableStyle;
             if (in_array($secTag, ['thead', 'tbody', 'tfoot'], true)) {
+                $occupied = [];
                 $secStyle = $computeStyle($section, $tableStyle);
-                if ($secStyle['display'] === 'none') continue;
+                if ($secStyle['display'] === 'none')
+                    continue;
                 foreach ($section->childNodes as $child) {
                     if ($child instanceof DOMElement && strtolower($child->tagName) === 'tr') {
                         $trElements[] = $child;
@@ -66,28 +78,39 @@ final class TableEngine
                 }
             }
 
-            foreach ($trElements as $tr) {
-                $rowStyle = $computeStyle($tr, $tableStyle);
-                if ($rowStyle['display'] === 'none') continue;
+            foreach ($trElements as $sectionRow => $tr) {
+                $rowStyle = $computeStyle($tr, $secStyle);
+                if ($rowStyle['display'] === 'none')
+                    continue;
 
                 $cells = [];
                 $colIdx = 0;
 
                 foreach ($tr->childNodes as $cell) {
-                    if (!$cell instanceof DOMElement) continue;
+                    if (!$cell instanceof DOMElement)
+                        continue;
                     $cellTag = strtolower($cell->tagName);
-                    if ($cellTag !== 'td' && $cellTag !== 'th') continue;
+                    if ($cellTag !== 'td' && $cellTag !== 'th')
+                        continue;
 
                     $cellStyle = $computeStyle($cell, $rowStyle);
-                    if ($cellStyle['display'] === 'none') continue;
+                    if ($cellStyle['display'] === 'none')
+                        continue;
 
                     // Advance to next unoccupied slot
                     while (isset($occupied[$rowIdx][$colIdx])) {
                         $colIdx++;
                     }
 
-                    $colspan = max(1, (int) $cell->getAttribute('colspan'));
-                    $rowspan = max(1, (int) $cell->getAttribute('rowspan'));
+                    $colspan = min(1000, max(1, (int) $cell->getAttribute('colspan')));
+                    $remainingRows = count($trElements) - $sectionRow;
+                    if ($secTag === 'tr') {
+                        for ($next = $sectionIndex + 1; isset($sections[$next]) && strtolower($sections[$next]->tagName) === 'tr'; $next++) {
+                            $remainingRows++;
+                        }
+                    }
+                    $rowspan = $cell->getAttribute('rowspan') === '0'
+                        ? $remainingRows : min($remainingRows, max(1, (int) $cell->getAttribute('rowspan')));
 
                     // If cell doesn't have an explicit width, inherit from <col>
                     if ($cellStyle['width'] === null && isset($colStyles[$colIdx]['width'])) {
@@ -161,7 +184,8 @@ final class TableEngine
 
         foreach ($rows as $r => $row) {
             foreach ($row['cells'] as $cell) {
-                if ($cell['rowspan'] <= 1) continue;
+                if ($cell['rowspan'] <= 1)
+                    continue;
                 $key = $cell['row'] . '_' . $cell['col'];
                 $reqH = $cellHeights[$key] ?? 0.0;
                 $rs = $cell['rowspan'];

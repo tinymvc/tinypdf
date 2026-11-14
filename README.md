@@ -1,242 +1,161 @@
 # TinyPDF
 
-Fast, dependency-free Modern **HTML to PDF** generator for PHP 8.2+.
-Comprehensive multilingual support for **Bangla (বাংলা)**, Chinese (中文), Japanese (日本語), Arabic (العربية), and any custom TrueType/OpenType font, featuring **Flexbox**, **background images**, table **`rowspan`**, pure vector **SVG**, **clickable links**, and **inline badges**.
+A pure-PHP HTML-to-PDF library for invoices, reports, receipts, and other controlled document templates. Requires PHP 8.2+; no browser, subprocess, JavaScript runtime, or Composer runtime packages.
+
+TinyPDF implements a **document-oriented subset of HTML and CSS**, not a browser engine. Review the compatibility limits below before choosing it for a template. Arbitrary websites, complete OpenType shaping, and browser-identical rendering are outside its current scope.
+
+## Install
 
 ```bash
 composer require tinymvc/tinypdf
 ```
 
-**Zero external dependencies.** Requires only PHP 8.2+ and standard PHP extensions: `ext-dom`, `ext-mbstring`, `ext-zlib` (plus `ext-gd` for raster PNG/GIF/WebP images).
+Required extensions: `dom`, `mbstring`, `zlib`, and `ctype`. Install `gd` for PNG, GIF, and WebP images. JPEG and inline SVG do not require GD. Composer checks the required extensions during installation.
 
----
-
-## Highlights
-
-- ⚡ **Zero Bloat for English/USA Documents**: English/Latin documents use standard built-in PDF core fonts with **0 KB font embedding overhead**, generating microscopic PDFs (~2 KB) in milliseconds.
-- 🌐 **Global Multilingual Support**: Supports custom `.ttf`, `.otf`, `.woff`, and `.ttc` fonts for **Bangla (বাংলা)**, Chinese (中文), Japanese (日本語), Korean (한국어), Arabic (العربية with RTL & cursive joining), Hindi (Devanagari), Cyrillic, and more.
-- 🇧🇩 **Bangla & Complex Script Shaping**: Built-in syllable analysis, pre-base vowel reordering (`ি`, `ে`, `ৈ`), two-part vowel splitting (`ো`, `ৌ`), Reph (`র্`), and conjunct ligatures (যুক্তবর্ণ - `ক্ত`, `ক্ষ`, `জ্ঞ`, `শ্চ`, `হ্ম`...).
-- 🀄 **CJK Line Breaking**: Native Unicode line breaking for Chinese, Japanese, and Korean text at character boundaries without requiring whitespace.
-- 🎨 **CSS `@font-face` & `$pdf->addFont()`**: Register custom fonts either directly in PHP or via standard CSS `@font-face` declarations in `<style>` blocks.
-- 📐 **Modern CSS Flexbox**: `display: flex` with `flex-direction: row | column`, `justify-content: space-between | center | flex-start | flex-end | space-around`, `align-items`, `gap`, and `flex: 1` / `flex-grow`.
-- 🖼️ **Background Images**: Full `background-image: url(...)` support with `background-size: cover | contain | <length>`, `background-repeat`, `background-position`, and `border-radius` clipping.
-- 📊 **Advanced Tables**: Full support for `<td rowspan="...">` and `<td colspan="...">`, repeating `<thead>` across multi-page tables, and border collapsing.
-- 🎨 **Pure Vector SVG**: Crisp, infinite-resolution vector `<svg>` tags and `.svg` files directly rendered into native PDF vector operators (`path`, `rect`, `circle`, `ellipse`, `polygon`, `transforms`).
-- 🔗 **Clickable Hyperlinks & Bookmarks**: Real PDF `/Link` annotations for `<a href="...">` links and automatic PDF document outlines/bookmarks.
-- 🏷️ **Inline Box Model & Badges**: Inline elements (`<span>`) support `background`, `padding`, `border`, and `border-radius: 9999px` for status badges and pill tags.
-- 💧 **Real Alpha Transparency**: ExtGState (`/ca` and `/CA`) support for genuine alpha blending with `opacity` and `rgba(...)`.
-
----
-
-## Quick Start (English / Standard)
-
-For standard English / Latin documents, TinyPDF uses built-in core fonts by default with zero font file bloat:
+## Quick start
 
 ```php
+require 'vendor/autoload.php';
+
 use Spark\Pdf\HtmlPdf;
 
-$pdf = new HtmlPdf('A4', margin: 12);
+$pdf = new HtmlPdf('A4', margin: 15, footer: 'Page {page} of {pages}');
 $pdf->setTitle('Invoice #42')->addHtml('
-    <h1 style="color:#0f766e">Hello TinyPDF</h1>
-    <p>Fast HTML to PDF with <b>zero dependencies</b> and microscopic file size.</p>
+    <h1 style="color:#0f766e">Invoice #42</h1>
+    <p>Thank you for your order.</p>
 ');
-
-$pdf->save('invoice.pdf');          // ~2 KB PDF!
-// $pdf->download('invoice.pdf');   // send to browser
+$pdf->save('invoice.pdf');
+// $bytes = $pdf->output();
+// $pdf->download('invoice.pdf');
 ```
 
----
+Each `addHtml()` starts a new page. Repeated calls to `output()` rebuild page decorations without duplicating them. Pages may be added after output. Default Latin text uses the PDF core fonts without embedding a font file.
 
-## Custom Fonts for Bangla, Chinese, Arabic & Other Languages
+The [invoice example](examples/invoice.php) demonstrates typography, CSS custom properties, padded cards, flex layout, pill badges, tables, and page numbering:
 
-You can register custom TrueType (`.ttf`), OpenType (`.otf`), or TrueType Collection (`.ttc`) fonts in two simple ways:
+```bash
+composer install
+php examples/invoice.php invoice.pdf
+```
 
-### 1. Registering via PHP API (`addFont`)
+## Fonts and languages
+
+Register the exact fonts your deployment will use. Font coverage and shaping are separate requirements: a font can contain a character without supporting its correct contextual appearance in this renderer.
 
 ```php
-use Spark\Pdf\HtmlPdf;
-
-$pdf = new HtmlPdf('A4', margin: 15);
-
-// Register custom fonts
-$pdf->addFont('Bangla', 'path/to/kalpurush.ttf');
-$pdf->addFont('Chinese', 'path/to/simsun.ttc');
-$pdf->addFont('Arabic', 'path/to/amiri.ttf');
-
-$html = <<<'HTML'
-<!-- Bangla with automated syllable & conjunct shaping -->
-<div style="font-family: Bangla; background: #f0fdf4; padding: 12px; border-radius: 8px;">
-    <h2 style="color: #166534; margin: 0 0 6px 0;">বাংলাদেশ আমার অহংকার</h2>
-    <p style="margin: 0;">যুক্তবর্ণ ও শিক্ষার আলো ছড়িয়ে দিতে TinyPDF এখন সম্পূর্ণ আধুনিক।</p>
-</div>
-
-<!-- Chinese with automated character boundary line-wrapping -->
-<div style="font-family: Chinese; margin-top: 15px;">
-    <h3>你好，世界！</h3>
-    <p>这是一个非常快速、现代且支持多语言的HTML到PDF生成器。</p>
-</div>
-HTML;
-
-$pdf->addHtml($html)->save('multilingual.pdf');
+$pdf = new HtmlPdf(fontFamily: 'Bangla, Helvetica', margin: 15);
+$pdf->addFont('Bangla', '/path/to/Bengali-Regular.ttf');
+$pdf->addFont('Bangla', '/path/to/Bengali-Bold.ttf', bold: true);
+$pdf->addHtml('<p style="font-size:16pt;line-height:normal">আমি বাংলা ভাষায় কথা বলি।</p>');
+$pdf->save('bangla.pdf');
 ```
 
-### 2. Registering via CSS `@font-face`
-
-You can also use standard CSS `@font-face` right inside your HTML template:
+Local CSS font registration is also supported:
 
 ```html
 <style>
   @font-face {
-    font-family: 'SolaimanLipi';
-    src: url('fonts/SolaimanLipi.ttf');
+    font-family: 'Bangla';
+    src: url('fonts/Bengali-Regular.ttf');
+    font-weight: 400;
   }
-  @font-face {
-    font-family: 'NotoSansSC';
-    src: url('fonts/NotoSansSC.ttf');
-  }
-  body {
-    font-family: 'NotoSansSC', 'SolaimanLipi', Helvetica, sans-serif;
-  }
+  body { font-family: 'Bangla', Helvetica, sans-serif; }
 </style>
-
-<h1>Custom Font via @font-face</h1>
-<p>TinyPDF automatically parses and embeds your fonts.</p>
 ```
 
----
+Set `basePath` to resolve relative image and font paths. Register separate bold/italic files when accurate variants matter. Missing variants reuse the available face; they do not synthesize new outlines. Automatic fallback searches a small set of common Windows, Linux, and macOS font paths. Explicit registration is more reproducible. If no font covers a text run, generation throws a `RuntimeException` instead of silently replacing its characters with question marks.
 
-## Modern Invoice with Flexbox & Table Rowspan
+Supported font containers have **TrueType outlines**: TTF, TrueType-flavored OTF, WOFF 1, and the first face of a TTC. CFF/CFF2 OpenType, WOFF2, variable-font axes, and color emoji are unsupported. Unsupported or malformed fonts fail explicitly. Fonts are embedded in full, not subsetted; large CJK fonts can significantly increase file size and memory use. Ensure your fonts permit embedding.
 
-```php
-use Spark\Pdf\HtmlPdf;
+Language coverage:
 
-$html = <<<'HTML'
-<style>
-  body { font-family: Helvetica, Arial, sans-serif; font-size: 10pt; color: #334155; }
-  .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 16px; }
-  .logo { font-size: 18pt; font-weight: bold; color: #0f766e; }
-  .badge { background: #dcfce7; color: #15803d; padding: 4px 10px; border-radius: 9999px; font-weight: bold; font-size: 9pt; }
-  table.items { width: 100%; border-collapse: collapse; margin-top: 15px; }
-  table.items th { background: #0f766e; color: #ffffff; padding: 8px; text-align: left; }
-  table.items td { padding: 8px; border-bottom: 1px solid #e2e8f0; }
-  .right { text-align: right; }
-  .center { text-align: center; }
-</style>
+- Latin: core fonts cover Windows-1252; register a suitable font for additional characters.
+- Bengali and Devanagari: basic vowel reordering and selected GSUB ligatures. Wrapping preserves combining sequences and Bengali/Devanagari virama clusters. Normal line height uses the selected font's ascent, descent, and line gap.
+- Arabic: basic presentation-form joining and bidirectional runs, including digits and combining marks. Use an appropriate font and `dir="rtl"`. Mixed styled RTL runs, embeddings/isolates, and full Unicode bidi behavior are not implemented.
+- CJK: embedded-font glyphs and character-boundary wrapping. Full language-specific punctuation and line-breaking rules are not implemented.
 
-<div class="header">
-  <div>
-    <span class="logo">Acme Systems Ltd</span>
-    <div style="color: #64748b; font-size: 9pt;">New York, NY, USA</div>
-  </div>
-  <div class="right">
-    <div style="font-size: 12pt; font-weight: bold;">INVOICE #1042</div>
-    <div style="margin-top: 5px;"><span class="badge">PAID IN FULL</span></div>
-  </div>
-</div>
+**Complex-script limitation:** the engine does not implement full OpenType GSUB contextual processing or GPOS mark positioning. Some Bengali conjuncts, reph, vowel/mark combinations, Arabic harakat, and other Indic scripts will differ from a browser. Validate the actual text and font visually. Embedded text includes logical Unicode `ActualText` for readers that support it; extraction behavior varies by PDF reader. The OpenType [Bengali shaping specification](https://learn.microsoft.com/en-us/typography/script-development/bengali) describes the broader behavior that is not fully implemented here.
 
-<table class="items">
-  <thead>
-    <tr>
-      <th>Category</th>
-      <th>Description</th>
-      <th class="center">Qty</th>
-      <th class="right">Price</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td rowspan="2" style="background: #f8fafc; font-weight: bold; vertical-align: top;">Cloud Hosting</td>
-      <td>TinyPDF Enterprise Server (1 Year)</td>
-      <td class="center">1</td>
-      <td class="right">$1,200.00</td>
-    </tr>
-    <tr>
-      <td>Automated Backup & SSL Security</td>
-      <td class="center">1</td>
-      <td class="right">$300.00</td>
-    </tr>
-    <tr>
-      <td style="background: #f8fafc; font-weight: bold;">Support</td>
-      <td>24/7 Priority Support & Maintenance</td>
-      <td class="center">1</td>
-      <td class="right">$500.00</td>
-    </tr>
-    <tr style="background: #f1f5f9; font-weight: bold;">
-      <td colspan="3" class="right">Total:</td>
-      <td class="right" style="color: #0f766e; font-size: 11pt;">$2,000.00</td>
-    </tr>
-  </tbody>
-</table>
-HTML;
+## HTML and CSS compatibility
 
-$pdf = new HtmlPdf('A4', margin: [12, 12, 18, 12], footer: 'Page {page} of {pages}');
-$pdf->addHtml($html)->save('invoice.pdf');
-```
+| Area | Implemented behavior | Limits |
+|---|---|---|
+| HTML | Headings, paragraphs, sections, lists, inline text, links, tables, images, inline SVG | No JavaScript, canvas, interactive forms, or external stylesheets |
+| Cascade | Embedded and inline CSS, class/id/tag selectors, Unicode class names, descendant/child selectors, `:root`, `:first-child`, `:last-child`, `:nth-child`, `!important` | No attribute/sibling selectors, pseudo-elements, selector functions, or CSS nesting |
+| Print CSS | `@page` size and margins; plain `@media print`, `all`, and `only print`; `<style media="print">` | No conditional media features, named pages, margin boxes, or `@supports` |
+| Theme values | Inherited custom properties, `var()` and fallback values | No registered custom properties or `calc()` |
+| Typography | Font family/size/weight/style, common `font` shorthand, alignment, underline/strike, transforms, spacing, `line-height` | No full typographic shaping or kerning; use explicit fonts for reliable results |
+| Wrapping | Normal flow, `pre`, `pre-wrap`, `nowrap`, long-word breaking, CJK breaks | Overlong normal words may be broken to fit; `pre-line`, hyphenation, and full Unicode line breaking are unsupported |
+| Boxes | Margins, padding, width/height, min/max width, min-height, border-box, solid/dashed/dotted borders, a uniform border radius | No floats, grid, shadows, gradients, clipping/scrolling overflow, or arbitrary transforms; max-height applies to images |
+| Flex | Single row/column, grow ratios, shrinking, alignment, justification, and gap; wrapping content measured at allocated widths | No flex-wrap, full flex-basis/min-content algorithm, or fragmentation of a flex item across pages; keep flex groups shorter than a page |
+| Inline boxes | Padded badges and inline-blocks with backgrounds, borders, and baseline alignment | Decorated spans are treated as indivisible boxes; decorations do not fragment across lines |
+| Tables | Auto/explicit column widths, colspan/rowspan, ordered sections, repeating thead, unequal row heights | Rows and connected rowspan groups should fit on a page; no splitting oversized rows, repeating tfoot, or complete collapsed-border conflict resolution |
+| Pagination | Automatic text/table page breaks, `break-before/after`, basic `break-inside:avoid`, headers and footers | No widows/orphans; reserve sufficient margins for headers/footers |
+| Positioning | Basic absolute positioning; relative elements establish containing blocks | Relative offsets are not applied. Fixed elements do not repeat on every page; use header/footer APIs instead |
+| Color | Hex, common named colors, RGB/HSL, background/text alpha, basic element opacity | No full CSS compositing groups or blend modes; opacity on nested groups is approximate |
+| Images | JPEG, PNG alpha, GIF, WebP, data URIs, SVG images, image max-width/max-height, rounded image clipping | No animation, object-fit, or automatic image downsampling |
+| Backgrounds | Images, cover/contain, repeat, position, rounded clipping, page watermarks | Single image layer; no gradients or multiple backgrounds |
+| SVG | Lines, polygons, rectangles, circles/ellipses, cubic/quadratic/arc paths, basic transforms and viewBox | No SVG text, gradients, filters, masks, use/defs, full styling, or complete preserveAspectRatio modes |
+| PDF features | External links, internal block anchors, flat heading bookmarks, metadata, compressed streams | No PDF/A, PDF/UA, tagged accessibility, signatures, encryption, or fillable forms |
 
----
+Lengths accept `px`, `pt`, `mm`, `cm`, `in`, `em`, `rem`, and percentages where the layout property supports them. One CSS pixel is 0.75 PDF points. Numeric constructor margins and custom page sizes use **millimetres**. Unknown CSS declarations are generally ignored.
 
-## API Reference
+## API
 
 ```php
 new HtmlPdf(
-    string|array $format = 'A4',      // 'A3', 'A4', 'A5', 'A6', 'Letter', 'Legal', 'Card' or custom [w, h], '(w, h)', '80x120', '4in 6in'
-    string $orientation = 'P',        // 'P' (portrait) or 'L' (landscape)
-    float|array $margin = 10,         // mm: one value, [vertical, horizontal] or [top, right, bottom, left]
-    float $fontSize = 10,             // default font size in pt
-    string $fontFamily = 'helvetica', // default font family
-    ?string $basePath = null,         // base directory for relative images and fonts
-    bool $allowRemote = false,        // allow http(s) images (trusted HTML only)
-    ?string $footer = null,           // footer text; {page} and {pages} are replaced
+    string|array $format = 'A4',
+    string $orientation = 'P',
+    float|array $margin = 10,
+    float $fontSize = 10,
+    string $fontFamily = 'helvetica',
+    ?string $basePath = null,
+    bool $allowRemote = false,
+    ?string $footer = null,
 );
 ```
 
-### Methods
+Formats: `A3`, `A4`, `A5`, `A6`, `Letter`, `Legal`, `Card`, or custom `[width, height]` in mm. Strings such as `80x120` or `4in 6in` are accepted. Margins take one number, `[vertical, horizontal]`, or `[top, right, bottom, left]`. Orientation is `P` or `L`.
 
-| Method | Description |
+| Method | Purpose |
 |---|---|
-| `addHtml(string $html, $format = null, ?string $orientation = null)` | Renders HTML starting on a new page. Chaining returns `$this`. |
-| `addFont(string $family, string $path, bool $bold = false, bool $italic = false)` | Registers a custom TrueType/OpenType/WOFF (`.ttf`, `.otf`, `.woff`, `.ttc`) font family. |
-| `addBookmark(string $title, int $level = 1, ?int $page = null, ?float $y = null)` | Appends an outline bookmark to the PDF document tree. |
-| `setBackgroundImage(string $src, float $opacity = 1.0)` | Sets a full-bleed page background image or watermark. |
-| `setTitle(string $title)` | Sets the PDF Title metadata. |
-| `setAuthor(string $author)` | Sets the PDF Author metadata. |
-| `setSubject(string $subject)` | Sets the PDF Subject metadata. |
-| `setFooter(?string $footer)` | Sets footer text on every page (`{page}` and `{pages}` replaced). |
-| `setHeaderHtml(?string $html, bool $excludeFirstPage = false)` | Sets dynamic HTML header on every page (`{page}` and `{pages}` supported). |
-| `setFooterHtml(?string $html, bool $excludeFirstPage = false)` | Sets dynamic HTML footer on every page (`{page}` and `{pages}` supported). |
-| `setBasePath(?string $path)` | Base directory for relative image and font paths. |
-| `output(): string` | Compiles and returns raw PDF binary string. |
-| `save(string $path)` | Writes the generated PDF to a file. |
-| `download(string $filename = 'document.pdf', bool $inline = false)` | Sends appropriate headers and PDF stream to the browser. |
+| `addHtml($html, $format = null, $orientation = null)` | Render a document or fragment on a new page |
+| `addFont($family, $path, $bold = false, $italic = false)` | Register a local font face |
+| `setTitle($title)`, `setAuthor($author)`, `setSubject($subject)` | Set Unicode PDF metadata |
+| `setBasePath($path)` | Resolve relative resource paths |
+| `setFooter($text)` | Add centered text with `{page}` and `{pages}` |
+| `setHeaderHtml($html, $excludeFirstPage = false)` | Add HTML in the reserved top margin |
+| `setFooterHtml($html, $excludeFirstPage = false)` | Add HTML in the reserved bottom margin; exclusion is independent of the header |
+| `setBackgroundImage($source, $opacity = 1.0)` | Add a full-page image to subsequently rendered pages |
+| `addBookmark($title, $level = 1, $page = null, $y = null)` | Add a flat outline entry; page is zero-based, y is in PDF points from the bottom; level is currently not used for nesting |
+| `output(): string` | Return PDF bytes |
+| `save($path): void` | Write PDF bytes to a file |
+| `download($filename = 'document.pdf', $inline = false): void` | Send PDF headers and bytes; call before other HTTP output |
 
----
+Configuration methods and `addHtml()` return the same instance for chaining. Header/footer HTML uses its own embedded styles. Avoid links and bookmarks in header/footer HTML; only its drawing operations are retained.
 
-## Supported HTML & CSS
+## Resource trust and deployment
 
-| Area | Features Supported |
-|---|---|
-| **Typography** | `color`, `font-family` (stacks & auto-fallback), `font-size`, `font-weight`, `font-style`, `text-align` (incl. justify), `text-decoration`, `text-transform`, `line-height`, `letter-spacing`, `word-spacing`, `word-break: break-all`, `overflow-wrap: break-word`, `white-space: pre` |
-| **Multilingual** | **Bangla (বাংলা)**, Chinese (中文), Japanese (日本語), Korean (한국어), Arabic (العربية RTL + harakat shaping), Hindi (Devanagari), and any custom `.ttf`/`.otf`/`.woff`/`.ttc` font |
-| **Page & Layout** | `@page` rules (size, orientation, margins), **Flexbox** (`display: flex`, `flex-direction`, `justify-content`, `align-items`, `gap`, `flex: 1`), `display: inline-block`, `position: relative/absolute` (`top/right/bottom/left`), `page-break-before/after/inside`, `min-width`, `max-width`, `max-height`, `direction: rtl/ltr` |
-| **Tables** | `table`, `colgroup`, `col`, `thead`, `tbody`, `tfoot` (standard section ordering), `tr`, `td`, `th`, **`rowspan`**, **`colspan`**, auto/percent widths, `border-collapse`, `cellpadding`, `cellspacing` |
-| **Graphics & Images** | `<img>` (JPEG, PNG with transparency, WebP, GIF, Data URIs), **`<svg>` elements**, **`.svg` images** (paths, shapes, matrix transforms), `border-radius` (circles, rounded photo frames) |
-| **Backgrounds** | `background-color`, **`background-image: url(...)`**, `background-repeat`, `background-position`, **`background-size: cover / contain`**, document watermarks |
-| **Interactive** | **`<a href="...">` clickable hyperlinks**, internal anchor jumps (`#id`), PDF document outlines / bookmarks (`<h1>`-`<h6>` and API) |
-| **Styling & Box Model** | `margin` (incl. `auto`), `padding`, `border` (solid/dashed/dotted), `border-radius`, `box-sizing: border-box`, `opacity: 0.0-1.0` (scoped state), `rgba(...)` with ExtGState |
-| **Units** | `px`, `pt`, `mm`, `cm`, `in`, `em`, `rem`, `%` |
+Use **trusted templates and trusted font files**. TinyPDF is not a sandbox for arbitrary uploaded HTML. Local image and CSS font paths can read files accessible to PHP. `basePath` resolves paths; it does not restrict them to a directory. Escape untrusted text with `htmlspecialchars()` before inserting it into templates.
 
----
+Remote images are disabled by default. `allowRemote: true` permits HTTP(S) requests and redirects, including destinations on the server's network; it does not provide SSRF filtering. Keep it disabled for user-controlled resources, or fetch and validate resources separately. Other PHP stream-wrapper image URLs are rejected. CSS font sources are local files only.
 
-## Running Tests
+Bound document size, image dimensions, and execution/memory limits in the application. Test representative documents under your production PHP configuration. Missing/unreadable images are omitted; PNG/GIF/WebP require GD. For predictable release output, use explicit font files and verify the rendered PDF rather than relying only on successful generation.
+
+## Validation
 
 ```bash
+composer install
+composer validate --strict
 composer test
-# or
-php tests/run.php
+php tests/run.php BanglaText
+php examples/invoice.php invoice.pdf
 ```
 
----
+Tests search common host font paths. Set `TINYPDF_BENGALI_FONT` and `TINYPDF_CJK_FONT` to choose fonts explicitly. Set `TINYPDF_REQUIRE_FONTS=1` to fail instead of skipping font tests. The CI workflow checks PHP 8.2–8.5 with fonts installed; its results must pass before tagging a release.
+
+For visual validation, render the invoice and your own multilingual/multipage templates in a PDF reader or with Poppler. Automated tests verify rendering operators and document structure, but do not establish universal browser fidelity or certify complex-script shaping.
 
 ## License
 
-MIT License. Free for commercial and open-source use.
+[MIT](LICENSE), copyright Shahin Moyshan.

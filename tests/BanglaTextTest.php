@@ -33,10 +33,7 @@ test('BengaliShaper decomposes two-part vowels', function () {
 
 test('HtmlPdf renders Bengali HTML with custom registered font', function () {
     $pdf = new HtmlPdf('A4');
-    $fontPath = 'C:/Windows/Fonts/kalpurush.ttf';
-    if (!is_file($fontPath)) {
-        skip('Kalpurush font not installed on host');
-    }
+    $fontPath = testFont('bengali');
     $pdf->addFont('Bangla', $fontPath);
     $html = '<h1 style="color:#0f766e">বাংলাদেশ আমার অহংকার</h1><p>যুক্তবর্ণ ও শিক্ষার আলো ছড়িয়ে দাও সর্বত্র।</p>';
     $pdf->addHtml($html);
@@ -51,10 +48,7 @@ test('HtmlPdf renders Bengali HTML with custom registered font', function () {
 
 test('HtmlPdf registers custom font via CSS @font-face', function () {
     $pdf = new HtmlPdf('A4');
-    $fontPath = 'C:/Windows/Fonts/kalpurush.ttf';
-    if (!is_file($fontPath)) {
-        skip('Kalpurush font not installed on host');
-    }
+    $fontPath = testFont('bengali');
     $html = <<<HTML
     <style>
       @font-face {
@@ -84,10 +78,7 @@ test('HtmlPdf keeps English-only documents small with zero custom font bloat', f
 
 test('HtmlPdf supports Chinese custom font and line wrapping', function () {
     $pdf = new HtmlPdf('A4');
-    $fontPath = is_file('C:/Windows/Fonts/msyh.ttc') ? 'C:/Windows/Fonts/msyh.ttc' : (is_file('C:/Windows/Fonts/simsun.ttc') ? 'C:/Windows/Fonts/simsun.ttc' : null);
-    if (!$fontPath) {
-        skip('Chinese font not installed on host');
-    }
+    $fontPath = testFont('cjk');
     $pdf->addFont('Chinese', $fontPath);
     $html = '<h1 style="font-family: Chinese;">你好，世界</h1><p style="font-family: Chinese;">这是一个非常快速的HTML到PDF生成器。</p>';
     $pdf->addHtml($html);

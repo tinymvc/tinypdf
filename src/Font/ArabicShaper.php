@@ -160,55 +160,55 @@ final class ArabicShaper
      */
     public static function bidiReorder(string $text): string
     {
-        // Split into runs of RTL vs LTR
-        $chars = mb_str_split($text);
-        $runs = [];
-        $currentRun = [];
-        $currentIsRtl = false;
-
-        foreach ($chars as $c) {
-            $isRtl = (bool) preg_match('/[\x{0600}-\x{06FF}\x{0750}-\x{077F}\x{FB50}-\x{FDFF}\x{FE70}-\x{FEFF}]/u', $c);
-            if ($currentRun === []) {
-                $currentIsRtl = $isRtl;
-                $currentRun[] = $c;
-            } elseif ($isRtl === $currentIsRtl) {
-                $currentRun[] = $c;
+        preg_match_all('/\X/u', $text, $matches);
+        $clusters = $matches[0];
+        $directions = [];
+        $baseRtl = null;
+        foreach ($clusters as $cluster) {
+            if (preg_match('/^[\p{N}]+$/u', $cluster)) {
+                $directions[] = false;
+            } elseif (preg_match('/[\x{0600}-\x{06FF}\x{0750}-\x{077F}\x{FB50}-\x{FDFF}\x{FE70}-\x{FEFC}]/u', $cluster)) {
+                $directions[] = true;
+                $baseRtl ??= true;
+            } elseif (preg_match('/\p{L}/u', $cluster)) {
+                $directions[] = false;
+                $baseRtl ??= false;
             } else {
-                $runs[] = ['rtl' => $currentIsRtl, 'text' => implode('', $currentRun)];
-                $currentIsRtl = $isRtl;
-                $currentRun = [$c];
+                $directions[] = null;
             }
         }
-        if ($currentRun !== []) {
-            $runs[] = ['rtl' => $currentIsRtl, 'text' => implode('', $currentRun)];
+        $baseRtl ??= false;
+        $previous = $baseRtl;
+        for ($i = 0, $count = count($clusters); $i < $count; $i++) {
+            if ($directions[$i] !== null) {
+                $previous = $directions[$i];
+                continue;
+            }
+            $end = $i;
+            while ($end < $count && $directions[$end] === null)
+                $end++;
+            $next = $directions[$end] ?? $baseRtl;
+            $neutral = $previous === $next ? $previous : $baseRtl;
+            while ($i < $end)
+                $directions[$i++] = $neutral;
+            $i--;
         }
-
+        $runs = [];
+        foreach ($clusters as $i => $cluster) {
+            $last = array_key_last($runs);
+            if ($last === null || $runs[$last]['rtl'] !== $directions[$i]) {
+                $runs[] = ['rtl' => $directions[$i], 'clusters' => [$cluster]];
+            } else {
+                $runs[$last]['clusters'][] = $cluster;
+            }
+        }
+        if ($baseRtl)
+            $runs = array_reverse($runs);
         $out = '';
         foreach ($runs as $run) {
-            if ($run['rtl']) {
-                $out .= self::reverseRtlPreservingDigits($run['text']);
-            } else {
-                $out .= $run['text'];
-            }
+            $out .= implode('', $run['rtl'] ? array_reverse($run['clusters']) : $run['clusters']);
         }
-
         return $out;
     }
 
-    private static function reverseRtlPreservingDigits(string $rtlText): string
-    {
-        // Tokenize into digit sequences and individual non-digit characters
-        $parts = preg_split('/([\d\x{0660}-\x{0669}\x{06F0}-\x{06F9}]+)/u', $rtlText, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY) ?: [];
-        $reversed = [];
-        for ($k = count($parts) - 1; $k >= 0; $k--) {
-            $part = $parts[$k];
-            // If digit run, preserve Left-to-Right order
-            if (preg_match('/^[\d\x{0660}-\x{0669}\x{06F0}-\x{06F9}]+$/u', $part)) {
-                $reversed[] = $part;
-            } else {
-                $reversed[] = implode('', array_reverse(mb_str_split($part)));
-            }
-        }
-        return implode('', $reversed);
-    }
 }

@@ -31,17 +31,8 @@ use function sprintf;
 use function strlen;
 
 /**
- * HtmlPdf - dependency-free, modern HTML to PDF generator for PHP 8.2+.
- *
- * Supports:
- * - Multilingual typography: Bangla (বাংলা), Arabic (العربية), Hindi, CJK, and custom TTF/OTF fonts.
- * - Complex script shaping: Syllable clustering, pre-base matra reordering, two-part vowel splitting, reph, ligatures.
- * - Modern layout: Flexbox (display: flex), inline badges/pills, inline-block, absolute positioning.
- * - Tables: full rowspan & colspan, auto/percent widths, repeating <thead>, zebra striping.
- * - Media & Graphics: background-image (cover, contain, repeat, position), pure vector SVG, JPEG, PNG (alpha), WebP, GIF.
- * - Real alpha transparency (opacity, rgba) via PDF ExtGState.
- * - Interactive PDF features: clickable hyperlinks (<a href="...">) and bookmarks/outlines.
- * - Page templating: rich HTML headers & footers with dynamic {page} and {pages} counters.
+ * Pure-PHP renderer for a documented subset of HTML/CSS document templates.
+ * See README.md for font, shaping, layout, and resource-trust limits.
  *
  * @author Shahin Moyshan <shahin.moyshan2@gmail.com>
  */
@@ -74,22 +65,75 @@ final class HtmlPdf
     ];
 
     private const FONT_KEYWORDS = [
-        'xx-small' => 9, 'x-small' => 10, 'small' => 13, 'medium' => 16, 'large' => 18, 'x-large' => 24, 'xx-large' => 32,
+        'xx-small' => 9,
+        'x-small' => 10,
+        'small' => 13,
+        'medium' => 16,
+        'large' => 18,
+        'x-large' => 24,
+        'xx-large' => 32,
     ];
 
     private const BLOCK_TAGS = [
-        'html', 'body', 'div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'dl', 'dt', 'dd', 'blockquote',
-        'pre', 'hr', 'table', 'section', 'article', 'header', 'footer', 'main', 'nav', 'aside', 'form', 'fieldset',
-        'address', 'figure', 'figcaption', 'center',
+        'html',
+        'body',
+        'div',
+        'p',
+        'h1',
+        'h2',
+        'h3',
+        'h4',
+        'h5',
+        'h6',
+        'ul',
+        'ol',
+        'li',
+        'dl',
+        'dt',
+        'dd',
+        'blockquote',
+        'pre',
+        'hr',
+        'table',
+        'section',
+        'article',
+        'header',
+        'footer',
+        'main',
+        'nav',
+        'aside',
+        'form',
+        'fieldset',
+        'address',
+        'figure',
+        'figcaption',
+        'center',
     ];
 
     private const HIDDEN_TAGS = [
-        'head', 'style', 'script', 'title', 'meta', 'link', 'noscript', 'canvas', 'input', 'select', 'textarea', 'template',
+        'head',
+        'style',
+        'script',
+        'title',
+        'meta',
+        'link',
+        'noscript',
+        'canvas',
+        'input',
+        'select',
+        'textarea',
+        'template',
     ];
 
     private const TABLE_DISPLAY = [
-        'table' => 'table', 'thead' => 'table-header-group', 'tbody' => 'table-row-group', 'tfoot' => 'table-footer-group',
-        'tr' => 'table-row', 'td' => 'table-cell', 'th' => 'table-cell', 'li' => 'list-item',
+        'table' => 'table',
+        'thead' => 'table-header-group',
+        'tbody' => 'table-row-group',
+        'tfoot' => 'table-footer-group',
+        'tr' => 'table-row',
+        'td' => 'table-cell',
+        'th' => 'table-cell',
+        'li' => 'list-item',
     ];
 
     private const UA = [
@@ -133,26 +177,67 @@ final class HtmlPdf
     ];
 
     private const INHERITED = [
-        'color', 'family', 'size', 'bold', 'italic', 'align', 'lh', 'under', 'strike',
-        'transform', 'list', 'pre', 'direction', 'letter-spacing', 'word-spacing', 'wordBreak'
+        'color',
+        'family',
+        'size',
+        'bold',
+        'italic',
+        'align',
+        'lh',
+        'under',
+        'strike',
+        'transform',
+        'list',
+        'pre',
+        'wrap',
+        'direction',
+        'letter-spacing',
+        'word-spacing',
+        'wordBreak'
     ];
 
     private const BORDER_NONE = ['w' => 0.0, 'c' => [0, 0, 0], 's' => 'none'];
 
     private const RESET = [
-        'display' => 'inline', 'bg' => null, 'bgImg' => null, 'bgRepeat' => 'no-repeat',
-        'bgPos' => '0% 0%', 'bgSize' => 'auto', 'opacity' => 1.0,
-        'margin' => [0.0, 0.0, 0.0, 0.0], 'mAutoL' => false, 'mAutoR' => false,
+        'display' => 'inline',
+        'bg' => null,
+        'bgImg' => null,
+        'bgRepeat' => 'no-repeat',
+        'bgPos' => '0% 0%',
+        'bgSize' => 'auto',
+        'opacity' => 1.0,
+        'margin' => [0.0, 0.0, 0.0, 0.0],
+        'mAutoL' => false,
+        'mAutoR' => false,
         'padding' => [0.0, 0.0, 0.0, 0.0],
         'border' => [self::BORDER_NONE, self::BORDER_NONE, self::BORDER_NONE, self::BORDER_NONE],
-        'radius' => 0.0, 'width' => null, 'minWidth' => null, 'maxWidth' => null,
-        'height' => null, 'minHeight' => null, 'maxHeight' => null, 'sizing' => 'content',
-        'position' => 'static', 'pos' => [null, null, null, null],
-        'breakBefore' => false, 'breakAfter' => false, 'breakInside' => true,
-        'valign' => null, 'shift' => 0.0, 'spacing' => 0.0, 'collapse' => false,
-        'flex-direction' => 'row', 'justify-content' => 'flex-start', 'align-items' => 'stretch',
-        'gap' => 0.0, 'flex' => null, 'flex-grow' => null,
-        'direction' => 'ltr', 'letter-spacing' => 0.0, 'word-spacing' => 0.0, 'wordBreak' => 'normal',
+        'radius' => 0.0,
+        'width' => null,
+        'minWidth' => null,
+        'maxWidth' => null,
+        'height' => null,
+        'minHeight' => null,
+        'maxHeight' => null,
+        'sizing' => 'content',
+        'position' => 'static',
+        'pos' => [null, null, null, null],
+        'breakBefore' => false,
+        'breakAfter' => false,
+        'breakInside' => true,
+        'valign' => null,
+        'shift' => 0.0,
+        'spacing' => 0.0,
+        'collapse' => false,
+        'flex-direction' => 'row',
+        'justify-content' => 'flex-start',
+        'align-items' => 'stretch',
+        'gap' => 0.0,
+        'flex' => null,
+        'flex-grow' => null,
+        'direction' => 'ltr',
+        'letter-spacing' => 0.0,
+        'word-spacing' => 0.0,
+        'wordBreak' => 'normal',
     ];
 
     // ------------------------------------------------------------------ state
@@ -184,14 +269,17 @@ final class HtmlPdf
     private array $info = [];
     private array $bookmarks = [];
     private array $anchors = [];
+    private float $rootFontSize;
 
     private FontManager $fontManager;
     private GraphicState $graphicState;
     private ?string $pageBackgroundImage = null;
+    private ?array $bodyBackground = null;
     private float $pageBackgroundOpacity = 1.0;
     private ?string $headerHtml = null;
     private ?string $footerHtml = null;
-    private bool $excludeHeaderFooterFirstPage = false;
+    private bool $excludeHeaderFirstPage = false;
+    private bool $excludeFooterFirstPage = false;
     private array $activeLinks = [];
 
     public function __construct(
@@ -204,10 +292,14 @@ final class HtmlPdf
         private bool $allowRemote = false,
         private ?string $footer = null,
     ) {
+        if (!is_finite($fontSize) || $fontSize <= 0) {
+            throw new InvalidArgumentException('Font size must be positive and finite.');
+        }
         $this->formatSpec = is_array($format) ? $format : [$format];
         $this->orientationSpec = $orientation;
         $this->pageSize($format, $orientation);
         $this->margin = $this->parseMargin($margin);
+        $this->rootFontSize = $fontSize;
         $this->fontManager = new FontManager();
         $this->graphicState = new GraphicState();
     }
@@ -241,14 +333,14 @@ final class HtmlPdf
     public function setHeaderHtml(?string $html, bool $excludeFirstPage = false): static
     {
         $this->headerHtml = $html;
-        $this->excludeHeaderFooterFirstPage = $excludeFirstPage;
+        $this->excludeHeaderFirstPage = $excludeFirstPage;
         return $this;
     }
 
     public function setFooterHtml(?string $html, bool $excludeFirstPage = false): static
     {
         $this->footerHtml = $html;
-        $this->excludeHeaderFooterFirstPage = $excludeFirstPage;
+        $this->excludeFooterFirstPage = $excludeFirstPage;
         return $this;
     }
 
@@ -275,7 +367,7 @@ final class HtmlPdf
     {
         $this->bookmarks[] = [
             'title' => $title,
-            'page' => $page ?? max(0, count($this->pages) - 1),
+            'page' => $page ?? ($this->pageOpen ? count($this->pages) : max(0, count($this->pages) - 1)),
             'y' => $y ?? max(0.0, $this->pageH - ($this->y + $this->pending)),
             'level' => max(1, $level),
         ];
@@ -292,6 +384,7 @@ final class HtmlPdf
         $doc = $this->parse($html);
         $this->styleCache = [];
         $this->rules = $this->collectRules($doc);
+        $this->bodyBackground = null;
 
         $spec = $format ?? (count($this->formatSpec) === 1 ? $this->formatSpec[0] : $this->formatSpec);
         if ($format !== null) {
@@ -300,18 +393,20 @@ final class HtmlPdf
         if ($orientation !== null) {
             $this->orientationSpec = $orientation;
         }
-        $this->beginPage($this->pageSize($spec, $orientation ?? $this->orientationSpec));
-
         $body = $doc->getElementsByTagName('body')->item(0);
         if (!$body instanceof DOMElement) {
+            $this->beginPage($this->pageSize($spec, $orientation ?? $this->orientationSpec));
             return $this;
         }
 
-        $style = $this->computeStyle($body, $this->rootStyle());
-        $this->pageBg = $style['bg'];
-        if ($style['bgImg'] !== null && $this->pageBackgroundImage === null) {
-            $this->pageBackgroundImage = $style['bgImg'];
-        }
+        $this->rootFontSize = $this->fontSize;
+        $root = $doc->documentElement instanceof DOMElement
+            ? $this->computeStyle($doc->documentElement, $this->rootStyle())
+            : $this->rootStyle();
+        $this->rootFontSize = $root['size'];
+        $style = $this->computeStyle($body, $root);
+        $this->bodyBackground = $style;
+        $this->beginPage($this->pageSize($spec, $orientation ?? $this->orientationSpec));
         $style['bg'] = null;
         $style['bgImg'] = null;
 
@@ -328,13 +423,16 @@ final class HtmlPdf
             $this->flushPage();
             $this->pageOpen = false;
         }
-        $this->addHeadersAndFooters();
+        $pages = $this->addHeadersAndFooters();
 
         $writer = new PdfWriter();
         foreach ($this->info as $k => $v) {
-            if ($k === 'Title') $writer->setTitle($v);
-            if ($k === 'Author') $writer->setAuthor($v);
-            if ($k === 'Subject') $writer->setSubject($v);
+            if ($k === 'Title')
+                $writer->setTitle($v);
+            if ($k === 'Author')
+                $writer->setAuthor($v);
+            if ($k === 'Subject')
+                $writer->setSubject($v);
         }
 
         $id = 2;
@@ -351,14 +449,20 @@ final class HtmlPdf
                 $id++;
                 $extraObjects[$id] = sprintf(
                     "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length %d >>\nstream\n%s\nendstream",
-                    $img['w'], $img['h'], strlen($img['smask']), $img['smask']
+                    $img['w'],
+                    $img['h'],
+                    strlen($img['smask']),
+                    $img['smask']
                 );
                 $extra = " /SMask $id 0 R";
             }
             $id++;
             $extraObjects[$id] = sprintf(
                 "<< %s%s /Length %d >>\nstream\n%s\nendstream",
-                $img['dict'], $extra, strlen($img['data']), $img['data']
+                $img['dict'],
+                $extra,
+                strlen($img['data']),
+                $img['data']
             );
             $imageRes .= "/{$img['name']} $id 0 R ";
         }
@@ -372,7 +476,7 @@ final class HtmlPdf
         }
 
         // Resolve internal anchors for link annotations
-        foreach ($this->pages as &$p) {
+        foreach ($pages as &$p) {
             if (!empty($p['annots'])) {
                 foreach ($p['annots'] as &$annot) {
                     if (str_starts_with($annot['url'], '#')) {
@@ -388,7 +492,7 @@ final class HtmlPdf
         unset($p);
 
         // Feed pages to writer
-        foreach ($this->pages as $p) {
+        foreach ($pages as $p) {
             $writer->addPage($p['w'], $p['h'], $p['ops'], $p['bg'], $p['annots'] ?? []);
         }
 
@@ -404,9 +508,10 @@ final class HtmlPdf
 
     public function download(string $filename = 'document.pdf', bool $inline = false): void
     {
+        $filename = str_replace(['\\', '"', "\r", "\n", "\0"], '_', basename($filename));
         $pdf = $this->output();
         header('Content-Type: application/pdf');
-        header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . '; filename="' . addslashes($filename) . '"');
+        header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . '; filename="' . $filename . '"');
         header('Content-Length: ' . strlen($pdf));
         echo $pdf;
     }
@@ -440,7 +545,7 @@ final class HtmlPdf
             if (count($vals) >= 2) {
                 $w = $this->toMm($vals[0]);
                 $h = $this->toMm($vals[1]);
-                if ($w !== null && $h !== null) {
+                if ($w !== null && $h !== null && is_finite($w) && is_finite($h) && $w > 0 && $h > 0) {
                     if (strtoupper($orientation) === 'L' && $w < $h) {
                         [$w, $h] = [$h, $w];
                     } elseif (strtoupper($orientation) === 'P' && $w > $h) {
@@ -471,7 +576,7 @@ final class HtmlPdf
                 } else {
                     throw new InvalidArgumentException("Unknown page format '$format'");
                 }
-                if ($w === null || $h === null) {
+                if ($w === null || $h === null || !is_finite($w) || !is_finite($h) || $w <= 0 || $h <= 0) {
                     throw new InvalidArgumentException("Unknown page format '$format'");
                 }
             }
@@ -505,21 +610,27 @@ final class HtmlPdf
         $this->pageH = $mm[1] * self::MM;
         $this->pageTop = $this->margin[0];
         $this->pageBottom = $this->pageH - $this->margin[2];
+        if ($this->pageBottom <= $this->pageTop || $this->pageW <= $this->margin[1] + $this->margin[3]) {
+            throw new InvalidArgumentException('Page margins leave no content area.');
+        }
         $this->ops = [];
         $this->pageAnnots = [];
         if (!$keepFrames) {
             $this->frames = [];
         }
-        $this->pageBg = null;
+        $this->pageBg = $this->bodyBackground['bg'] ?? null;
         $this->pageOpen = true;
         $this->y = $this->pageTop;
         $this->pending = 0.0;
 
         // Apply page-level background image if set
-        if ($this->pageBackgroundImage !== null) {
-            $img = $this->loadImage($this->pageBackgroundImage);
+        $backgroundImage = $this->pageBackgroundImage ?? ($this->bodyBackground['bgImg'] ?? null);
+        if ($backgroundImage !== null) {
+            $img = $this->loadImage($backgroundImage);
             if ($img !== null) {
-                $bg = new BackgroundImage($img['name'], $img['w'] * self::PX, $img['h'] * self::PX, 'no-repeat', 'center', 'cover', $this->pageBackgroundOpacity);
+                $bg = $this->pageBackgroundImage !== null
+                    ? new BackgroundImage($img['name'], $img['w'] * self::PX, $img['h'] * self::PX, 'no-repeat', 'center', 'cover', $this->pageBackgroundOpacity)
+                    : new BackgroundImage($img['name'], $img['w'] * self::PX, $img['h'] * self::PX, $this->bodyBackground['bgRepeat'], $this->bodyBackground['bgPos'], $this->bodyBackground['bgSize']);
                 $this->ops[] = $bg->render(0, 0, $this->pageW, $this->pageH, 0, $this->pageH, $this->graphicState);
             }
         }
@@ -533,6 +644,7 @@ final class HtmlPdf
             'ops' => $this->ops,
             'bg' => $this->pageBg,
             'annots' => $this->pageAnnots,
+            'margin' => $this->margin,
         ];
         $this->ops = [];
         $this->pageAnnots = [];
@@ -571,65 +683,61 @@ final class HtmlPdf
         }
     }
 
-    private function addHeadersAndFooters(): void
+    private function addHeadersAndFooters(): array
     {
         $total = count($this->pages);
-        $font = $this->fontManager->getFont('helvetica', false, false);
-        $resName = $this->fontManager->getResourceName($font);
+        $pages = $this->pages;
 
-        foreach ($this->pages as $i => &$page) {
+        foreach ($pages as $i => &$page) {
             $isFirst = ($i === 0);
-            if ($isFirst && $this->excludeHeaderFooterFirstPage) {
-                continue;
-            }
+            $margin = $page['margin'];
 
             // Simple text footer
             if ($this->footer !== null && $this->footer !== '') {
                 $text = str_replace(['{page}', '{pages}'], [(string) ($i + 1), (string) $total], $this->footer);
+                $font = $this->fontManager->getFont($this->fontFamily, false, false, $text);
+                $resName = $this->fontManager->getResourceName($font);
                 $w = $font->getTextWidth($text, 8.0);
                 $x = ($page['w'] - $w) / 2;
-                $y = $page['h'] - $this->margin[2] / 2 + 3;
+                $y = $page['h'] - $margin[2] / 2 + 3;
 
                 $op = sprintf(
-                    "q BT /%s 8 rg 0.43 0.43 0.43 rg %.3F %.3F Td %s Tj ET Q\n",
-                    $resName, $x, $page['h'] - $y, $font->encode($text)
+                    "q BT /%s 8 Tf 0.43 0.43 0.43 rg %.3F %.3F Td %s Tj ET Q\n",
+                    $resName,
+                    $x,
+                    $page['h'] - $y,
+                    $font->encode($text)
                 );
                 $page['ops'][] = $op;
             }
 
             // HTML Header
-            if ($this->headerHtml !== null && $this->headerHtml !== '') {
+            if ($this->headerHtml !== null && $this->headerHtml !== '' && !($isFirst && $this->excludeHeaderFirstPage)) {
                 $hHtml = str_replace(['{page}', '{pages}'], [(string) ($i + 1), (string) $total], $this->headerHtml);
-                $headerY = max(0.0, ($this->margin[0] / 2) - 4.0 * self::MM);
-                $ops = $this->renderIsolatedHtml($hHtml, $page['w'], $page['h'], $this->margin[3], $headerY, $page['w'] - $this->margin[1] - $this->margin[3]);
+                $headerY = max(0.0, ($margin[0] / 2) - 4.0 * self::MM);
+                $ops = $this->renderIsolatedHtml($hHtml, $page['w'], $page['h'], $margin[3], $headerY, $page['w'] - $margin[1] - $margin[3]);
                 if (!empty($ops)) {
                     array_unshift($page['ops'], ...$ops);
                 }
             }
 
             // HTML Footer
-            if ($this->footerHtml !== null && $this->footerHtml !== '') {
+            if ($this->footerHtml !== null && $this->footerHtml !== '' && !($isFirst && $this->excludeFooterFirstPage)) {
                 $fHtml = str_replace(['{page}', '{pages}'], [(string) ($i + 1), (string) $total], $this->footerHtml);
-                $footerY = $page['h'] - ($this->margin[2] / 2) - 4.0 * self::MM;
-                $ops = $this->renderIsolatedHtml($fHtml, $page['w'], $page['h'], $this->margin[3], $footerY, $page['w'] - $this->margin[1] - $this->margin[3]);
+                $footerY = $page['h'] - ($margin[2] / 2) - 4.0 * self::MM;
+                $ops = $this->renderIsolatedHtml($fHtml, $page['w'], $page['h'], $margin[3], $footerY, $page['w'] - $margin[1] - $margin[3]);
                 if (!empty($ops)) {
                     $page['ops'] = [...$page['ops'], ...$ops];
                 }
             }
         }
         unset($page);
+        return $pages;
     }
 
     private function renderIsolatedHtml(string $html, float $pageW, float $pageH, float $x, float $y, float $maxW): array
     {
-        $savedOps = $this->ops;
-        $savedY = $this->y;
-        $savedPageW = $this->pageW;
-        $savedPageH = $this->pageH;
-        $savedPageTop = $this->pageTop;
-        $savedPageBottom = $this->pageBottom;
-        $savedAllowBreak = $this->allowBreak;
-        $savedRules = $this->rules;
+        $saved = get_object_vars($this);
 
         $this->ops = [];
         $this->y = $y;
@@ -638,28 +746,28 @@ final class HtmlPdf
         $this->pageTop = $y;
         $this->pageBottom = $pageH;
         $this->allowBreak = false;
+        $this->pending = 0.0;
+        $this->frames = [];
+        $this->listStack = [];
+        $this->activeLinks = [];
+        $this->styleCache = [];
 
-        $doc = $this->parse($html);
-        $this->rules = $this->collectRules($doc);
-
-        $body = $doc->getElementsByTagName('body')->item(0);
-        if ($body instanceof DOMElement) {
-            $style = $this->computeStyle($body, $this->rootStyle());
-            $this->renderBox($body, $style, $x, $maxW);
+        try {
+            $doc = $this->parse($html);
+            $this->rules = $this->collectRules($doc);
+            $body = $doc->getElementsByTagName('body')->item(0);
+            if ($body instanceof DOMElement) {
+                $style = $this->computeStyle($body, $this->rootStyle());
+                $this->renderBox($body, $style, $x, $maxW);
+            }
+            return $this->ops;
+        } finally {
+            // Keep resources discovered in the header, but restore document layout state.
+            unset($saved['fontManager'], $saved['graphicState'], $saved['images'], $saved['imageCache']);
+            foreach ($saved as $name => $value) {
+                $this->$name = $value;
+            }
         }
-
-        $resultOps = $this->ops;
-
-        $this->ops = $savedOps;
-        $this->y = $savedY;
-        $this->pageW = $savedPageW;
-        $this->pageH = $savedPageH;
-        $this->pageTop = $savedPageTop;
-        $this->pageBottom = $savedPageBottom;
-        $this->allowBreak = $savedAllowBreak;
-        $this->rules = $savedRules;
-
-        return $resultOps;
     }
 
     // ---------------------------------------------------------------- parsing
@@ -678,9 +786,12 @@ final class HtmlPdf
     {
         $css = '';
         foreach ($doc->getElementsByTagName('style') as $style) {
-            $css .= $style->textContent . "\n";
+            if ($this->printMedia($style->getAttribute('media'))) {
+                $css .= $style->textContent . "\n";
+            }
         }
         $css = preg_replace('~/\*.*?\*/~s', '', $css) ?? '';
+        $css = $this->filterAtRules($css);
 
         // Parse @font-face rules
         if (preg_match_all('/@font-face\s*\{([^{}]*)\}/i', $css, $fontFaceMatches)) {
@@ -690,6 +801,8 @@ final class HtmlPdf
                     $family = trim($decl['font-family'], "'\"");
                     if (preg_match('/url\(([\'"]?)(.*?)\1\)/i', $decl['src'], $urlM)) {
                         $path = $urlM[2];
+                        if (str_contains($path, "\0") || preg_match('~^[a-z][a-z0-9+.-]*://~i', $path))
+                            continue;
                         if ($this->basePath !== null && !preg_match('~^(/|[A-Za-z]:[\\\\/])~', $path)) {
                             $path = rtrim($this->basePath, '/\\') . '/' . $path;
                         }
@@ -706,15 +819,12 @@ final class HtmlPdf
         // Parse @page rules
         if (preg_match('/@page\s*\{([^{}]*)\}/i', $css, $pageMatch)) {
             $pageDecl = $this->parseDeclarations($pageMatch[1]);
-            if (isset($pageDecl['margin'])) {
-                $mTokens = $this->tokens($pageDecl['margin']);
-                $margins = [];
-                foreach ($mTokens as $tok) {
-                    $len = $this->length($tok, 12.0);
-                    if ($len !== null) $margins[] = (float) $len / self::PX;
-                }
-                if (!empty($margins)) {
-                    $this->margin = $this->parseMargin(count($margins) === 1 ? $margins[0] : $margins);
+            foreach (self::SIDES as $i => $side) {
+                if (isset($pageDecl["margin-$side"])) {
+                    $length = $this->length($pageDecl["margin-$side"], $this->fontSize);
+                    if (is_float($length) && $length >= 0) {
+                        $this->margin[$i] = $length;
+                    }
                 }
             }
             if (isset($pageDecl['size'])) {
@@ -757,11 +867,11 @@ final class HtmlPdf
                 if (str_contains($m[1], '@')) {
                     continue;
                 }
-                $decl = $this->parseDeclarations($m[2]);
-                foreach (explode(',', $m[1]) as $selector) {
+                $decl = $this->parseDeclarations($m[2], $important);
+                foreach ($this->splitCss($m[1], ',') as $selector) {
                     $parts = $this->parseSelector(trim($selector));
                     if ($parts) {
-                        $rules[] = ['parts' => $parts, 'spec' => $this->specificity($selector), 'decl' => $decl, 'order' => $order];
+                        $rules[] = ['parts' => $parts, 'spec' => $this->specificity($selector), 'decl' => $decl, 'important' => $important, 'order' => $order];
                     }
                 }
             }
@@ -770,11 +880,33 @@ final class HtmlPdf
         return $rules;
     }
 
+    private function printMedia(string $media): bool
+    {
+        foreach (explode(',', strtolower(trim($media))) as $query) {
+            if (in_array(trim($query), ['', 'all', 'print', 'only print'], true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function filterAtRules(string $css): string
+    {
+        // Keep paged-media and font rules, flatten print media, and skip unsupported groups.
+        return preg_replace_callback('/@([\w-]+)([^{};]*)\{((?:[^{}]|\{(?3)\})*)\}/s', function (array $match): string {
+            $name = strtolower($match[1]);
+            if ($name === 'media') {
+                return $this->printMedia($match[2]) ? $this->filterAtRules($match[3]) : '';
+            }
+            return in_array($name, ['page', 'font-face'], true) ? $match[0] : '';
+        }, $css) ?? '';
+    }
+
     private function parseSelector(string $selector): array
     {
         $parts = [];
         $combinator = ' ';
-        $tokens = preg_split('/\s*(>)\s*|\s+/', $selector, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY) ?: [];
+        $tokens = preg_split('/\s*(>)\s*|\s+(?![^()]*\))/', $selector, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY) ?: [];
         foreach ($tokens as $token) {
             if ($token === '>') {
                 $combinator = '>';
@@ -786,11 +918,13 @@ final class HtmlPdf
         return $parts;
     }
 
-    private function specificity(string $selector): int
+    private function specificity(string $selector): array
     {
-        return 100 * (int) preg_match_all('/#[\w-]+/', $selector)
-            + 10 * (int) preg_match_all('/[.:][\w-]+/', $selector)
-            + (int) preg_match_all('/(?:^|[\s>])[a-zA-Z][\w-]*/', $selector);
+        return [
+            (int) preg_match_all('/#[\p{L}\p{N}\p{M}_-]+/u', $selector),
+            (int) preg_match_all('/[.:][\p{L}\p{N}\p{M}_-]+/u', $selector),
+            (int) preg_match_all('/(?:^|[\s>])[a-zA-Z][\w-]*/', $selector),
+        ];
     }
 
     private function matchSelector(DOMElement $el, array $parts, int $i): bool
@@ -817,9 +951,11 @@ final class HtmlPdf
 
     private function matchCompound(DOMElement $el, string $compound): bool
     {
-        if (!preg_match_all('/([#.:]?)(\*|[\w-]+)(?:\(([^)]*)\))?/', $compound, $m, PREG_SET_ORDER)) {
+        if (!preg_match_all('/([#.:]?)(\*|[\p{L}\p{N}\p{M}_-]+)(?:\(([^)]*)\))?/u', $compound, $m, PREG_SET_ORDER)) {
             return false;
         }
+        if (implode('', array_column($m, 0)) !== $compound)
+            return false;
         foreach ($m as $t) {
             [$type, $name, $arg] = [$t[1], $t[2], $t[3] ?? ''];
             $ok = match ($type) {
@@ -827,11 +963,12 @@ final class HtmlPdf
                 '#' => $el->getAttribute('id') === $name,
                 '.' => in_array($name, preg_split('/\s+/', trim($el->getAttribute('class'))) ?: [], true),
                 default => match (strtolower($name)) {
-                    'first-child' => $this->elementIndex($el) === 1,
-                    'last-child' => $this->nextElement($el) === null,
-                    'nth-child' => $this->nthMatches($this->elementIndex($el), $arg),
-                    default => false,
-                },
+                        'first-child' => $this->elementIndex($el) === 1,
+                        'last-child' => $this->nextElement($el) === null,
+                        'nth-child' => $this->nthMatches($this->elementIndex($el), $arg),
+                        'root' => $el === $el->ownerDocument->documentElement,
+                        default => false,
+                    },
             };
             if (!$ok) {
                 return false;
@@ -864,11 +1001,14 @@ final class HtmlPdf
     private function nthMatches(int $pos, string $arg): bool
     {
         $arg = strtolower(trim($arg));
-        if ($arg === 'odd') return $pos % 2 === 1;
-        if ($arg === 'even') return $pos % 2 === 0;
-        if (ctype_digit($arg)) return $pos === (int) $arg;
+        if ($arg === 'odd')
+            return $pos % 2 === 1;
+        if ($arg === 'even')
+            return $pos % 2 === 0;
+        if (ctype_digit($arg))
+            return $pos === (int) $arg;
         if (preg_match('/^([+-]?\d*)n\s*(?:([+-])\s*(\d+))?$/', $arg, $m)) {
-            $a = match ($m[1]) { '', '+' => 1, '-' => -1, default => (int) $m[1] };
+            $a = match ($m[1]) { '', '+' => 1, '-' => -1, default => (int) $m[1]};
             $b = isset($m[3]) ? (int) $m[3] * ($m[2] === '-' ? -1 : 1) : 0;
             $n = $pos - $b;
             return $a === 0 ? $n === 0 : ($n % $a === 0 && intdiv($n, $a) >= 0);
@@ -886,9 +1026,19 @@ final class HtmlPdf
     private function rootStyle(): array
     {
         return [
-            'color' => [0, 0, 0], 'family' => $this->fontFamily, 'size' => $this->fontSize, 'bold' => false,
-            'italic' => false, 'align' => 'left', 'lh' => 1.2, 'under' => false, 'strike' => false,
-            'transform' => 'none', 'list' => 'disc', 'pre' => false,
+            'color' => [0, 0, 0],
+            'family' => $this->fontFamily,
+            'size' => $this->fontSize,
+            'bold' => false,
+            'italic' => false,
+            'align' => 'left',
+            'lh' => null,
+            'under' => false,
+            'strike' => false,
+            'transform' => 'none',
+            'list' => 'disc',
+            'pre' => false,
+            'wrap' => true,
         ] + self::RESET;
     }
 
@@ -911,12 +1061,27 @@ final class HtmlPdf
 
         $decl = $this->normalize(self::UA[$tag] ?? []);
         $decl = array_replace($decl, $this->normalize($this->attributeDeclarations($el, $tag)));
+        $important = [];
         foreach ($this->rules as $rule) {
             if ($this->matchSelector($el, $rule['parts'], count($rule['parts']) - 1)) {
                 $decl = array_replace($decl, $rule['decl']);
+                $important = array_replace($important, $rule['important']);
             }
         }
-        $decl = array_replace($decl, $this->parseDeclarations($el->getAttribute('style')));
+        $inline = $this->parseDeclarations($el->getAttribute('style'), $inlineImportant);
+        $decl = array_replace($decl, $inline, $important, $inlineImportant);
+        $s['variables'] = $parent['variables'] ?? [];
+        foreach ($decl as $name => $value) {
+            if (str_starts_with($name, '--')) {
+                $s['variables'][$name] = $value;
+            }
+        }
+        foreach ($decl as $name => $value) {
+            if (str_contains($value, 'var(')) {
+                $decl[$name] = $this->resolveVariables($value, $s['variables']);
+            }
+        }
+        $decl = $this->normalize($decl);
         $this->apply($s, $decl, $parent);
 
         // In RTL mode, default text alignment is right unless explicitly overridden
@@ -926,6 +1091,18 @@ final class HtmlPdf
 
         $this->styleCache[$key] = ['el' => $el, 's' => $s];
         return $s;
+    }
+
+    private function resolveVariables(string $value, array $variables, array $seen = []): string
+    {
+        return preg_replace_callback('/var\(\s*(--[\w-]+)\s*(?:,\s*((?:[^()]|\((?2)\))*))?\)/', function (array $match) use ($variables, $seen): string {
+            $name = $match[1];
+            if (isset($seen[$name])) {
+                return $match[2] ?? '';
+            }
+            $seen[$name] = true;
+            return $this->resolveVariables($variables[$name] ?? ($match[2] ?? ''), $variables, $seen);
+        }, $value) ?? $value;
     }
 
     private function attributeDeclarations(DOMElement $el, string $tag): array
@@ -966,22 +1143,28 @@ final class HtmlPdf
 
         switch ($tag) {
             case 'font':
-                if (($v = $attr('color')) !== '') $d['color'] = $v;
-                if (($v = $attr('face')) !== '') $d['font-family'] = $v;
+                if (($v = $attr('color')) !== '')
+                    $d['color'] = $v;
+                if (($v = $attr('face')) !== '')
+                    $d['font-family'] = $v;
                 if (($v = $attr('size')) !== '' && isset([1 => 1, 2 => 1, 3 => 1, 4 => 1, 5 => 1, 6 => 1, 7 => 1][(int) $v])) {
                     $d['font-size'] = [1 => 7.5, 2 => 10, 3 => 12, 4 => 13.5, 5 => 18, 6 => 24, 7 => 36][(int) $v] . 'pt';
                 }
                 break;
             case 'table':
-                if (($v = $attr('cellspacing')) !== '') $d['border-spacing'] = $px($v);
-                if ((int) $attr('border') > 0) $d['border'] = ((int) $attr('border')) . 'px solid #999';
+                if (($v = $attr('cellspacing')) !== '')
+                    $d['border-spacing'] = $px($v);
+                if ((int) $attr('border') > 0)
+                    $d['border'] = ((int) $attr('border')) . 'px solid #999';
                 break;
             case 'td':
             case 'th':
                 for ($p = $el->parentNode; $p instanceof DOMElement; $p = $p->parentNode) {
                     if ($this->tag($p) === 'table') {
-                        if (($v = trim($p->getAttribute('cellpadding'))) !== '') $d['padding'] = $px($v);
-                        if ((int) $p->getAttribute('border') > 0) $d['border'] = '1px solid #999';
+                        if (($v = trim($p->getAttribute('cellpadding'))) !== '')
+                            $d['padding'] = $px($v);
+                        if ((int) $p->getAttribute('border') > 0)
+                            $d['border'] = '1px solid #999';
                         break;
                     }
                 }
@@ -990,18 +1173,54 @@ final class HtmlPdf
         return $d;
     }
 
-    private function parseDeclarations(string $css): array
+    private function parseDeclarations(string $css, ?array &$important = null): array
     {
         $out = [];
-        foreach (explode(';', $css) as $declaration) {
-            if (!str_contains($declaration, ':')) continue;
+        $important = [];
+        foreach ($this->splitCss($css, ';') as $declaration) {
+            if (!str_contains($declaration, ':'))
+                continue;
             [$name, $value] = explode(':', $declaration, 2);
+            $isImportant = (bool) preg_match('/\s*!important\s*$/i', $value);
             $value = trim(preg_replace('/\s*!important\s*$/i', '', $value) ?? $value);
             if ($value !== '') {
-                $out[strtolower(trim($name))] = $value;
+                $name = trim($name);
+                $expanded = $this->normalize([str_starts_with($name, '--') ? $name : strtolower($name) => $value]);
+                $out = array_replace($out, $expanded);
+                if ($isImportant) {
+                    $important = array_replace($important, $expanded);
+                }
             }
         }
-        return $this->normalize($out);
+        return array_replace($out, $important);
+    }
+
+    private function splitCss(string $css, string $delimiter): array
+    {
+        $parts = [];
+        $start = 0;
+        $depth = 0;
+        $quote = null;
+        for ($i = 0, $length = strlen($css); $i < $length; $i++) {
+            $char = $css[$i];
+            if ($char === '\\') {
+                $i++;
+            } elseif ($quote !== null) {
+                if ($char === $quote)
+                    $quote = null;
+            } elseif ($char === '"' || $char === "'") {
+                $quote = $char;
+            } elseif ($char === '(' || $char === '[') {
+                $depth++;
+            } elseif ($char === ')' || $char === ']') {
+                $depth--;
+            } elseif ($char === $delimiter && $depth === 0) {
+                $parts[] = substr($css, $start, $i - $start);
+                $start = $i + 1;
+            }
+        }
+        $parts[] = substr($css, $start);
+        return $parts;
     }
 
     private function normalize(array $in): array
@@ -1009,7 +1228,20 @@ final class HtmlPdf
         $out = [];
         foreach ($in as $name => $value) {
             $value = trim((string) $value);
+            if (str_contains($value, 'var(')) {
+                $out[$name] = $value;
+                continue;
+            }
             switch ($name) {
+                case 'font':
+                    if (preg_match('/^(.*?)\b((?:\d*\.)?\d+(?:px|pt|em|rem|%|mm|cm|in)|xx-small|x-small|small|medium|large|x-large|xx-large)(?:\s*\/\s*([^\s]+))?\s+(.+)$/i', $value, $font)) {
+                        $out['font-style'] = preg_match('/\b(italic|oblique)\b/i', $font[1], $style) ? $style[1] : 'normal';
+                        $out['font-weight'] = preg_match('/\b(bold|bolder|[1-9]00)\b/i', $font[1], $weight) ? $weight[1] : 'normal';
+                        $out['font-size'] = $font[2];
+                        $out['line-height'] = $font[3] !== '' ? $font[3] : 'normal';
+                        $out['font-family'] = $font[4];
+                    }
+                    break;
                 case 'margin':
                 case 'padding':
                     foreach ($this->box($value) as $i => $v) {
@@ -1125,7 +1357,8 @@ final class HtmlPdf
                     $s['italic'] = $l === 'italic' || $l === 'oblique';
                     break;
                 case 'text-align':
-                    if (in_array($l, ['left', 'right', 'center', 'justify'], true)) $s['align'] = $l;
+                    if (in_array($l, ['left', 'right', 'center', 'justify'], true))
+                        $s['align'] = $l;
                     break;
                 case 'text-decoration':
                 case 'text-decoration-line':
@@ -1137,6 +1370,7 @@ final class HtmlPdf
                     break;
                 case 'white-space':
                     $s['pre'] = str_starts_with($l, 'pre');
+                    $s['wrap'] = !in_array($l, ['pre', 'nowrap'], true);
                     break;
                 case 'line-height':
                     $s['lh'] = $this->lineHeight($l, $fs);
@@ -1257,7 +1491,7 @@ final class HtmlPdf
                     $s['sizing'] = $l === 'border-box' ? 'border' : 'content';
                     break;
                 case 'position':
-                    $s['position'] = match ($l) { 'absolute', 'fixed' => 'absolute', 'relative' => 'relative', default => 'static' };
+                    $s['position'] = match ($l) { 'absolute', 'fixed' => 'absolute', 'relative' => 'relative', default => 'static'};
                     break;
                 case 'top':
                     $s['pos'][0] = $this->length($value, $fs);
@@ -1337,21 +1571,27 @@ final class HtmlPdf
         return trim($v, "'\"");
     }
 
-    private function lineHeight(string $v, float $fs): float
+    private function lineHeight(string $v, float $fs): ?float
     {
-        if ($v === 'normal' || $v === '') return 1.2;
-        if (is_numeric($v)) return (float) $v;
+        if ($v === 'normal' || $v === '')
+            return null;
+        if (is_numeric($v))
+            return (float) $v;
         $len = $this->length($v, $fs);
-        if (is_float($len)) return $fs > 0 ? $len / $fs : 1.2;
+        if (is_float($len))
+            return $fs > 0 ? $len / $fs : 1.2;
         return is_string($len) ? (float) $len / 100 : 1.2;
     }
 
     private function fontSizeOf(string $v, float $parent): float
     {
         $v = strtolower(trim($v));
-        if (isset(self::FONT_KEYWORDS[$v])) return self::FONT_KEYWORDS[$v] * self::PX;
-        if ($v === 'smaller') return $parent * 0.83;
-        if ($v === 'larger') return $parent * 1.2;
+        if (isset(self::FONT_KEYWORDS[$v]))
+            return self::FONT_KEYWORDS[$v] * self::PX;
+        if ($v === 'smaller')
+            return $parent * 0.83;
+        if ($v === 'larger')
+            return $parent * 1.2;
         $len = $this->length($v, $parent);
         return match (true) {
             is_float($len) => $len,
@@ -1373,7 +1613,7 @@ final class HtmlPdf
             'cm' => $n * self::MM * 10,
             'in' => $n * 72,
             'em' => $n * $fs,
-            'rem' => $n * $this->fontSize,
+            'rem' => $n * $this->rootFontSize,
             '%' => $m[1] . '%',
             default => $n * self::PX,
         };
@@ -1395,7 +1635,7 @@ final class HtmlPdf
     private function color(string $v): ?array
     {
         $c = Color::parse($v);
-        return $c?->rgb;
+        return $c === null ? null : [...$c->rgb, $c->alpha];
     }
 
     // ------------------------------------------------------- block layout
@@ -1416,7 +1656,7 @@ final class HtmlPdf
     private function renderChildren(DOMNode $parent, array $s, float $x, float $w): void
     {
         $items = [];
-        $textStyle = ['bg' => null] + $s;
+        $textStyle = ['bg' => null, 'radius' => 0.0, 'padding' => [0.0, 0.0, 0.0, 0.0], 'border' => self::RESET['border']] + $s;
 
         // If parent is flex container, dispatch to FlexEngine
         if ($s['display'] === 'flex') {
@@ -1440,7 +1680,7 @@ final class HtmlPdf
                 $this->renderAbsolute($node, $cs, $x, $w);
                 continue;
             }
-            if ($cs['display'] !== 'inline') {
+            if (!in_array($cs['display'], ['inline', 'inline-block'], true)) {
                 $this->flushLines($items, $x, $w, $s);
                 $this->renderBlock($node, $cs, $x, $w);
                 continue;
@@ -1454,12 +1694,36 @@ final class HtmlPdf
     {
         $children = [];
         foreach ($parent->childNodes as $node) {
-            if (!$node instanceof DOMElement) continue;
-            $cs = $this->computeStyle($node, $s);
-            if ($cs['display'] === 'none') continue;
+            if ($node instanceof DOMText && trim($node->nodeValue ?? '') !== '') {
+                $anonymous = $parent->ownerDocument->createElement('span');
+                $anonymous->appendChild($node->cloneNode());
+                $node = $anonymous;
+                $cs = array_intersect_key($s, array_flip(self::INHERITED)) + self::RESET;
+                $cs['display'] = 'block';
+            } elseif ($node instanceof DOMElement) {
+                $cs = $this->computeStyle($node, $s);
+            } else {
+                continue;
+            }
+            if ($cs['display'] === 'none')
+                continue;
+            if ($cs['position'] === 'absolute') {
+                $this->renderAbsolute($node, $cs, $x, $w);
+                continue;
+            }
 
             $naturalH = $this->measure(fn() => $this->renderElement($node, $cs, 0.0, $w));
-            $naturalW = $cs['width'] !== null ? $this->px($cs['width'], $w) : $this->maxContent(['el' => $node, 's' => $cs]);
+            $naturalW = $cs['width'] !== null ? $this->outerWidth($cs, $w) : $this->maxContent(['el' => $node, 's' => $cs]);
+            if ($cs['width'] === null && in_array($this->tag($node), ['img', 'svg'], true)) {
+                $item = $this->tag($node) === 'img' ? $this->imageItem($node, $cs, $w) : $this->svgItem($node, $cs, $w);
+                $naturalW = $item['w'] ?? 0.0;
+            }
+            if ($cs['width'] === null) {
+                [, $pr, , $pl] = $this->edges($cs['padding'], $w);
+                [, $mr, , $ml] = $this->edges($cs['margin'], $w);
+                [, $br, , $bl] = array_column($cs['border'], 'w');
+                $naturalW += $pl + $pr + $bl + $br + $ml + $mr;
+            }
 
             $children[] = [
                 'el' => $node,
@@ -1470,6 +1734,23 @@ final class HtmlPdf
         }
 
         $layout = FlexEngine::layout($children, $x, $this->y + $this->pending, $w, $s);
+        $childIndices = [];
+        foreach ($children as $i => $child)
+            $childIndices[spl_object_id($child['el'])] = $i;
+        foreach ($layout['items'] as $item) {
+            $i = $childIndices[spl_object_id($item['el'])];
+            $childStyle = $item['s'];
+            $childStyle['width'] = null;
+            $children[$i]['naturalH'] = $this->measure(fn() => $this->renderElement($item['el'], $childStyle, 0.0, $item['w']));
+        }
+        $layout = FlexEngine::layout($children, $x, $this->y + $this->pending, $w, $s);
+        if (
+            $this->allowBreak && $layout['totalH'] <= $this->pageBottom - $this->pageTop
+            && $this->y + $this->pending + $layout['totalH'] > $this->pageBottom && $this->y > $this->pageTop
+        ) {
+            $this->newPage();
+            $layout = FlexEngine::layout($children, $x, $this->y, $w, $s);
+        }
         $this->settle();
 
         foreach ($layout['items'] as $it) {
@@ -1477,7 +1758,16 @@ final class HtmlPdf
             $savedPending = $this->pending;
             $this->y = $it['y'];
             $this->pending = 0.0;
-            $this->renderElement($it['el'], $it['s'], $it['x'], $it['w']);
+            $childStyle = $it['s'];
+            $childStyle['width'] = null;
+            if ($s['align-items'] === 'stretch' && !str_starts_with($s['flex-direction'], 'column')) {
+                $childStyle['minHeight'] = $it['h'];
+                $childStyle['sizing'] = 'border';
+            }
+            $allowBreak = $this->allowBreak;
+            $this->allowBreak = false;
+            $this->renderBlock($it['el'], $childStyle, $it['x'], $it['w']);
+            $this->allowBreak = $allowBreak;
             $this->y = $savedY;
             $this->pending = $savedPending;
         }
@@ -1497,7 +1787,7 @@ final class HtmlPdf
         if ($el->hasAttribute('id') && !$this->measuring) {
             $id = $el->getAttribute('id');
             $this->anchors[$id] = [
-                'page' => max(0, count($this->pages) - 1),
+                'page' => count($this->pages),
                 'y' => max(0.0, $this->pageH - ($this->y + $this->pending)),
             ];
         }
@@ -1531,7 +1821,11 @@ final class HtmlPdf
 
     private function renderElement(DOMElement $el, array $s, float $x, float $w): void
     {
-        if ($s['display'] === 'table' && $this->tag($el) === 'table') {
+        if ($this->tag($el) === 'img') {
+            $this->renderImageBlock($el, $s, $x, $w);
+        } elseif ($this->tag($el) === 'svg') {
+            $this->renderSvgBlock($el, $s, $x, $w);
+        } elseif ($s['display'] === 'table' && $this->tag($el) === 'table') {
             $this->renderTable($el, $s, $x, $w);
         } else {
             $this->renderBox($el, $s, $x, $w);
@@ -1558,10 +1852,20 @@ final class HtmlPdf
         }
 
         if ($s['minWidth'] !== null) {
-            $cw = max($cw, $this->px($s['minWidth'], $w));
+            $cw = max($cw, $this->px($s['minWidth'], $w) - ($s['sizing'] === 'border' ? $extra : 0.0));
         }
         if ($s['maxWidth'] !== null) {
-            $cw = min($cw, $this->px($s['maxWidth'], $w));
+            $cw = max(0.0, min($cw, $this->px($s['maxWidth'], $w) - ($s['sizing'] === 'border' ? $extra : 0.0)));
+        }
+        if ($s['mAutoL'] || $s['mAutoR']) {
+            $free = max(0.0, $w - $cw - $extra - ($s['mAutoL'] ? 0 : $ml) - ($s['mAutoR'] ? 0 : $mr));
+            if ($s['mAutoL'] && $s['mAutoR']) {
+                $ml = $mr = $free / 2;
+            } elseif ($s['mAutoL']) {
+                $ml = $free;
+            } else {
+                $mr = $free;
+            }
         }
 
         $vertical = $pt + $pb + $bt + $bb;
@@ -1571,8 +1875,13 @@ final class HtmlPdf
         $this->pending = max($this->pending, $mt);
         $i = count($this->frames);
         $this->frames[] = [
-            's' => $s, 'x' => $x + $ml, 'w' => $cw + $extra, 'start' => null,
-            'op' => count($this->ops), 'first' => true, 'hb' => $hb,
+            's' => $s,
+            'x' => $x + $ml,
+            'w' => $cw + $extra,
+            'start' => null,
+            'op' => count($this->ops),
+            'first' => true,
+            'hb' => $hb,
         ];
         if ($pt + $bt > 0) {
             $this->settle();
@@ -1652,10 +1961,20 @@ final class HtmlPdf
             $img = $this->loadImage($f['s']['bgImg']);
             if ($img !== null) {
                 $bg = new BackgroundImage(
-                    $img['name'], $img['w'] * self::PX, $img['h'] * self::PX,
-                    $f['s']['bgRepeat'], $f['s']['bgPos'], $f['s']['bgSize'], $f['s']['opacity']
+                    $img['name'],
+                    $img['w'] * self::PX,
+                    $img['h'] * self::PX,
+                    $f['s']['bgRepeat'],
+                    $f['s']['bgPos'],
+                    $f['s']['bgSize'],
+                    $f['s']['opacity']
                 );
-                $ops = $bg->render($f['x'], $f['start'], $f['w'], $h, (float) $f['s']['radius'], $this->pageH, $this->graphicState) . $ops;
+                $radius = is_string($f['s']['radius']) ? (float) $f['s']['radius'] / 100 * min($f['w'], $h) : $f['s']['radius'];
+                $fill = ['border' => self::RESET['border']] + $f['s'];
+                $border = ['bg' => null] + $f['s'];
+                $ops = $this->boxOps($f['x'], $f['start'], $f['w'], $h, $fill)
+                    . $bg->render($f['x'], $f['start'], $f['w'], $h, $radius, $this->pageH, $this->graphicState)
+                    . $this->boxOps($f['x'], $f['start'], $f['w'], $h, $border, [$f['first'], true, $last, true]);
             }
         }
 
@@ -1676,18 +1995,20 @@ final class HtmlPdf
         $this->marker = null;
         $this->pageAnnots = [];
 
-        $fn();
-        $height = $this->y + $this->pending;
-
-        [$this->ops, $this->y, $this->pending, $this->frames, $this->allowBreak, $this->measuring, $this->marker, $this->listStack, $this->pageAnnots] = $saved;
-        return $height;
+        try {
+            $fn();
+            return $this->y + $this->pending;
+        } finally {
+            [$this->ops, $this->y, $this->pending, $this->frames, $this->allowBreak, $this->measuring, $this->marker, $this->listStack, $this->pageAnnots] = $saved;
+        }
     }
 
     // ------------------------------------------------- absolute positioning
 
     private function renderAbsolute(DOMElement $el, array $s, float $x, float $w): void
     {
-        if ($this->measuring) return;
+        if ($this->measuring)
+            return;
         $cb = $this->containingBlock();
         $resolve = fn(float|string|null $v, float $base): ?float => $v === null ? null : $this->px($v, $base);
         $top = $resolve($s['pos'][0], $cb['h'] ?? 0.0);
@@ -1721,7 +2042,8 @@ final class HtmlPdf
         }
 
         $item = $isImage ? $this->imageItem($el, $s, $pw) : null;
-        if ($isImage && $item === null) return;
+        if ($isImage && $item === null)
+            return;
 
         if ($top !== null) {
             $by = $cb['y'] + $top;
@@ -1749,7 +2071,8 @@ final class HtmlPdf
     private function outerWidth(array $s, float $base): float
     {
         $width = $this->px($s['width'], $base);
-        if ($s['sizing'] === 'border') return $width;
+        if ($s['sizing'] === 'border')
+            return $width;
         [, $pr, , $pl] = $this->edges($s['padding'], $base);
         [, $br, , $bl] = array_column($s['border'], 'w');
         return $width + $pl + $pr + $bl + $br;
@@ -1764,8 +2087,10 @@ final class HtmlPdf
             }
         }
         return [
-            'x' => $this->margin[3], 'y' => $this->pageTop,
-            'w' => $this->pageW - $this->margin[1] - $this->margin[3], 'h' => $this->pageBottom - $this->pageTop,
+            'x' => $this->margin[3],
+            'y' => $this->pageTop,
+            'w' => $this->pageW - $this->margin[1] - $this->margin[3],
+            'h' => $this->pageBottom - $this->pageTop,
         ];
     }
 
@@ -1778,7 +2103,8 @@ final class HtmlPdf
         $columns = $gridData['colCount'];
         $head = $gridData['headRows'];
 
-        if (!$rows || $columns === 0) return;
+        if (!$rows || $columns === 0)
+            return;
 
         $spacing = $s['collapse'] ? 0.0 : (float) $s['spacing'];
         [, $mr, , $ml] = $this->edges($s['margin'], $w);
@@ -1797,8 +2123,35 @@ final class HtmlPdf
             $this->settle();
             $this->y += $spacing;
             $grid['x'] = $cx;
-            foreach ($rows as $row) {
-                $this->drawRow($row, $grid, false);
+            $naturalHeights = [];
+            $cellHeights = [];
+            foreach ($rows as $i => &$row) {
+                $measured = $this->measureRow($row, $grid);
+                $row['layout'] = $measured['cells'];
+                $row['index'] = $i;
+                $naturalHeights[$i] = $measured['height'];
+                foreach ($row['cells'] as &$cell)
+                    $cell['row'] = $i;
+                unset($cell);
+                foreach ($measured['cells'] as $cell) {
+                    $cellHeights[$i . '_' . $cell['col']] = $cell['h'] - $spacing * ($cell['rowspan'] - 1);
+                }
+            }
+            unset($row);
+            $grid['heights'] = TableEngine::distributeRowHeights($rows, $naturalHeights, $cellHeights);
+            $grid['head'] = array_values(array_filter($rows, static fn($row) => $row['head']));
+            for ($i = 0, $count = count($rows); $i < $count; ) {
+                $end = $i + 1;
+                for ($j = $i; $j < $end && $j < $count; $j++) {
+                    foreach ($rows[$j]['cells'] as $cell)
+                        $end = max($end, $j + $cell['rowspan']);
+                }
+                $end = min($count, $end);
+                $rows[$i]['groupHeight'] = array_sum(array_slice($grid['heights'], $i, $end - $i)) + $spacing * ($end - $i - 1);
+                for ($j = $i; $j < $end; $j++) {
+                    $this->drawRow($rows[$j], $grid, $j > $i);
+                }
+                $i = $end;
             }
         });
     }
@@ -1807,6 +2160,7 @@ final class HtmlPdf
     {
         $spec = array_fill(0, $n, null);
         $max = array_fill(0, $n, 0.0);
+        $min = array_fill(0, $n, 0.0);
         $spans = [];
 
         foreach ($rows as $row) {
@@ -1821,6 +2175,7 @@ final class HtmlPdf
 
                 if ($span === 1) {
                     $max[$c] = max($max[$c], $content);
+                    $min[$c] = max($min[$c], $this->minContent($cell['el'], $cs) + $extra);
                     if (is_string($cs['width'])) {
                         $spec[$c] = ['pct' => (float) $cs['width']];
                     } elseif (is_float($cs['width'])) {
@@ -1871,15 +2226,43 @@ final class HtmlPdf
             }
         } else {
             $remaining = max(0.0, $target - $fixedSum);
+            $minimum = array_sum(array_map(static fn($c) => $min[$c], $auto));
+            $growth = max(0.0, $autoMax - $minimum);
             foreach ($fixed as $c => $v) {
                 $widths[$c] = $v;
             }
             foreach ($auto as $c) {
-                $widths[$c] = $autoMax > 0 ? $max[$c] * $remaining / $autoMax : $remaining / count($auto);
+                if ($minimum > $remaining && $minimum > 0) {
+                    $widths[$c] = $min[$c] * $remaining / $minimum;
+                } else {
+                    $share = $growth > 0 ? ($max[$c] - $min[$c]) / $growth : 1 / count($auto);
+                    $widths[$c] = $min[$c] + max(0.0, $remaining - $minimum) * $share;
+                }
             }
         }
         ksort($widths);
         return array_map(static fn($v) => max(2.0, (float) $v), array_values($widths));
+    }
+
+    private function minContent(DOMElement $element, array $style): float
+    {
+        if (!$style['wrap'])
+            return $this->maxContent(['el' => $element, 's' => $style]);
+        $width = 0.0;
+        foreach ($element->childNodes as $node) {
+            if ($node instanceof DOMText) {
+                $items = [];
+                $this->collectText($node->nodeValue ?? '', $style, $items);
+                foreach ($items as $item)
+                    $width = max($width, $item['w']);
+            } elseif ($node instanceof DOMElement) {
+                $childStyle = $this->computeStyle($node, $style);
+                if ($childStyle['display'] !== 'none') {
+                    $width = max($width, $this->minContent($node, $childStyle));
+                }
+            }
+        }
+        return $width;
     }
 
     private function maxContent(array $cell): float
@@ -1892,7 +2275,7 @@ final class HtmlPdf
         return $width;
     }
 
-    private function drawRow(array $row, array $grid, bool $repeat): void
+    private function measureRow(array $row, array $grid): array
     {
         $spacing = $grid['spacing'];
         $cells = [];
@@ -1911,17 +2294,35 @@ final class HtmlPdf
                 $height = max($height, $cs['height'] + ($cs['sizing'] === 'border' ? 0.0 : $pt + $pb + $bt + $bb));
             }
             $cells[] = [
-                'el' => $cell['el'], 's' => $cs, 'x' => $cellX, 'w' => $cellW, 'h' => $height, 'innerW' => $innerW,
-                'dx' => $bl + $pl, 'dy' => $bt + $pt, 'rowspan' => $cell['rowspan'] ?? 1,
+                'el' => $cell['el'],
+                's' => $cs,
+                'x' => $cellX,
+                'w' => $cellW,
+                'h' => $height,
+                'innerW' => $innerW,
+                'col' => $col,
+                'dx' => $bl + $pl,
+                'dy' => $bt + $pt,
+                'rowspan' => $cell['rowspan'] ?? 1,
             ];
         }
 
-        $rowH = $cells ? max(array_column($cells, 'h')) : 0.0;
+        $rowH = $cells ? max(array_map(static fn($cell) => $cell['rowspan'] === 1 ? $cell['h'] : 0.0, $cells)) : 0.0;
         if (is_float($row['s']['height'])) {
             $rowH = max($rowH, $row['s']['height']);
         }
 
-        if (!$repeat && $this->allowBreak && $this->y + $rowH > $this->pageBottom && $this->y > $this->pageTop + 0.01) {
+        return ['cells' => $cells, 'height' => $rowH];
+    }
+
+    private function drawRow(array $row, array $grid, bool $repeat): void
+    {
+        $spacing = $grid['spacing'];
+        $cells = $row['layout'];
+        $rowH = $grid['heights'][$row['index']];
+        $needed = $row['groupHeight'] ?? $rowH;
+
+        if (!$repeat && $this->allowBreak && $this->y + $needed > $this->pageBottom && $this->y > $this->pageTop + 0.01) {
             $this->newPage();
             if (!$row['head']) {
                 foreach ($grid['head'] as $headRow) {
@@ -1933,10 +2334,11 @@ final class HtmlPdf
         $top = $this->y;
         $rowX = $grid['x'] + $spacing;
         $rowW = array_sum($grid['cols']) + $spacing * (count($grid['cols']) - 1);
-        $this->ops[] = $this->boxOps($rowX, $top, $rowW, $rowH, $row['s'], [true, true, true, true], $grid['collapse']);
+        $this->ops[] = $this->boxOps($rowX, $top, $rowW, $rowH, ['bg' => null] + $row['s'], [true, true, true, true], $grid['collapse']);
 
         foreach ($cells as $c) {
-            $cellSpanH = $rowH * $c['rowspan'] + $spacing * ($c['rowspan'] - 1);
+            $cellSpanH = array_sum(array_slice($grid['heights'], $row['index'], $c['rowspan'])) + $spacing * ($c['rowspan'] - 1);
+            $c['s']['bg'] ??= $row['s']['bg'];
             $this->ops[] = $this->boxOps($c['x'], $top, $c['w'], $cellSpanH, $c['s'], [true, true, true, true], $grid['collapse']);
             $valign = $c['s']['valign'] ?? 'middle';
             $offset = match ($valign) {
@@ -1984,24 +2386,39 @@ final class HtmlPdf
         }
 
         // Inline box styling check (badge / pill: background, padding, or border on inline)
-        $hasBadgeStyle = ($s['bg'] !== null || $s['radius'] > 0 || ($s['padding'][1] + $s['padding'][3]) > 0 || $s['display'] === 'inline-block');
+        $hasBadgeStyle = $s['bg'] !== null || $s['radius'] > 0 || array_sum($this->edges($s['padding'], $w)) > 0
+            || array_sum(array_column($s['border'], 'w')) > 0 || $s['display'] === 'inline-block';
 
-        if ($hasBadgeStyle && $s['display'] === 'inline-block') {
-            // Measure entire inline-block box
-            $boxW = $s['width'] !== null ? $this->px($s['width'], $w) : null;
-            $boxH = is_float($s['height']) ? $s['height'] : null;
-            $measuredH = $this->measure(fn() => $this->renderChildren($el, $s, 0.0, $boxW ?? $w));
-            $finalH = $boxH ?? $measuredH;
-            $finalW = $boxW ?? $this->maxContent(['el' => $el, 's' => $s]);
+        if ($hasBadgeStyle) {
+            [, $pr, , $pl] = $this->edges($s['padding'], $w);
+            [, $br, , $bl] = array_column($s['border'], 'w');
+            [, $mr, , $ml] = $this->edges($s['margin'], $w);
+            $extra = $pl + $pr + $bl + $br;
+            if ($s['width'] === null) {
+                $s['width'] = min(max(0.0, $w - $extra - $ml - $mr), $this->maxContent(['el' => $el, 's' => $s]));
+                $s['sizing'] = 'content';
+            } else {
+                $s['width'] = $this->px($s['width'], $w);
+            }
+            $finalW = $s['width'] + ($s['sizing'] === 'border' ? 0.0 : $extra) + $ml + $mr;
+            $finalH = $this->measure(fn() => $this->renderBox($el, $s, 0.0, $finalW));
+            $font = $this->fontManager->getFont($s['family'], $s['bold'], $s['italic']);
+            $lineHeight = $s['lh'] === null ? $font->getLineHeight($s['size']) : $s['size'] * $s['lh'];
+            $leading = ($lineHeight - $font->getAscender($s['size']) + $font->getDescender($s['size'])) / 2;
+            $baseline = $leading - $font->getDescender($s['size'])
+                + $this->px($s['padding'][2], $w) + $s['border'][2]['w'] + $this->px($s['margin'][2], $w);
             $items[] = [
                 't' => 'inline-box',
                 'el' => $el,
                 's' => $s,
                 'w' => $finalW,
                 'h' => $finalH,
+                'baseline' => $baseline,
+                'link' => $this->activeLinks ? end($this->activeLinks) : null,
                 'k' => 'ib_' . spl_object_id($el),
             ];
-            if ($isLink) array_pop($this->activeLinks);
+            if ($isLink)
+                array_pop($this->activeLinks);
             return;
         }
 
@@ -2010,9 +2427,10 @@ final class HtmlPdf
                 $this->collectText($node->nodeValue ?? '', $s, $items);
             } elseif ($node instanceof DOMElement) {
                 $cs = $this->computeStyle($node, $s);
-                if ($cs['display'] === 'none') continue;
+                if ($cs['display'] === 'none')
+                    continue;
                 $this->collectInline($node, $cs, $items, $w);
-                if ($cs['display'] !== 'inline') {
+                if (!in_array($cs['display'], ['inline', 'inline-block'], true)) {
                     $items[] = ['t' => 'br', 'w' => 0.0, 's' => $s, 'k' => 'br'];
                 }
             }
@@ -2028,7 +2446,8 @@ final class HtmlPdf
         if ($s['pre']) {
             $lines = explode("\n", str_replace(["\r\n", "\r"], "\n", $text));
             foreach ($lines as $i => $line) {
-                if ($i > 0) $items[] = ['t' => 'br', 'w' => 0.0, 's' => $s, 'k' => 'br'];
+                if ($i > 0)
+                    $items[] = ['t' => 'br', 'w' => 0.0, 's' => $s, 'k' => 'br'];
                 if ($line !== '') {
                     $items[] = $this->textItem($this->transform(str_replace("\t", '    ', $line), $s), $s, 'w');
                 }
@@ -2037,7 +2456,8 @@ final class HtmlPdf
         }
 
         $text = preg_replace('/[ \t\r\n\f]+/', ' ', $text) ?? $text;
-        if ($text === '') return;
+        if ($text === '')
+            return;
         $text = $this->transform($text, $s);
 
         // Check if text has CJK characters (Chinese, Japanese, Korean)
@@ -2073,23 +2493,38 @@ final class HtmlPdf
     {
         $font = $this->fontManager->getFont($s['family'], $s['bold'], $s['italic'], $text);
         $letterSpacing = (float) ($s['letter-spacing'] ?? 0.0);
-        $charCount = mb_strlen($text);
-        $w = $font->getTextWidth($text, $s['size']) + ($letterSpacing * max(0, $charCount - 1));
+        $charCount = $font instanceof \Spark\Pdf\Font\TrueTypeFont ? count($font->shapeText($text)) : mb_strlen($text);
+        $w = $font->getTextWidth($text, $s['size']) + $letterSpacing * $charCount
+            + substr_count($text, ' ') * (float) $s['word-spacing'];
         $link = !empty($this->activeLinks) ? end($this->activeLinks) : null;
 
         $key = implode('|', [
-            $font->getName(), $s['size'], implode(',', $s['color']), (int) $s['under'], (int) $s['strike'],
-            $s['bg'] === null ? '' : implode(',', $s['bg']), $s['shift'], $link ?? '',
-            $letterSpacing, $s['word-spacing'] ?? 0.0,
+            spl_object_id($font),
+            $s['size'],
+            implode(',', $s['color']),
+            (int) $s['under'],
+            (int) $s['strike'],
+            $s['bg'] === null ? '' : implode(',', $s['bg']),
+            $s['shift'],
+            $link ?? '',
+            $letterSpacing,
+            $s['word-spacing'] ?? 0.0,
+            $s['opacity'],
+            $s['direction'],
+            $s['radius'],
+            implode(',', $s['padding']),
         ]);
         return ['t' => $type, 'x' => $text, 'w' => $w, 's' => $s, 'k' => $key, 'link' => $link];
     }
 
     private function flushLines(array &$items, float $x, float $w, array $s, ?string $align = null): void
     {
-        while ($items && $items[0]['t'] === 'sp') array_shift($items);
-        while ($items && $items[array_key_last($items)]['t'] === 'sp') array_pop($items);
-        if (!$items) return;
+        while ($items && $items[0]['t'] === 'sp')
+            array_shift($items);
+        while ($items && $items[array_key_last($items)]['t'] === 'sp')
+            array_pop($items);
+        if (!$items)
+            return;
         $this->settle();
         $lines = $this->breakLines($items, $w);
         $items = [];
@@ -2128,7 +2563,7 @@ final class HtmlPdf
                 continue;
             }
             $isBreakAll = ($it['s']['wordBreak'] ?? 'normal') === 'break-all';
-            if ($cur && $curW + $it['w'] > $w + 0.01) {
+            if ($it['s']['wrap'] && $cur && $curW + $it['w'] > $w + 0.01) {
                 if ($isBreakAll && $it['t'] === 'w') {
                     $avail = max(0.0, $w - $curW);
                     $pieces = $this->splitWord($it, $avail > 5.0 ? $avail : $w);
@@ -2149,7 +2584,7 @@ final class HtmlPdf
                 }
                 $push(false);
             }
-            if ($it['t'] === 'w' && $it['w'] > $w + 0.01) {
+            if ($it['s']['wrap'] && $it['t'] === 'w' && $it['w'] > $w + 0.01) {
                 foreach ($this->splitWord($it, $w) as $piece) {
                     if ($cur && $curW + $piece['w'] > $w + 0.01) {
                         $push(false);
@@ -2174,8 +2609,18 @@ final class HtmlPdf
         $buffer = '';
         $font = $this->fontManager->getFont($item['s']['family'], $item['s']['bold'], $item['s']['italic'], $item['x']);
 
-        foreach (mb_str_split($item['x']) as $char) {
-            if ($buffer !== '' && $font->getTextWidth($buffer . $char, $item['s']['size']) > $w) {
+        preg_match_all('/\X/u', $item['x'], $clusters);
+        $syllables = [];
+        foreach ($clusters[0] as $cluster) {
+            $last = array_key_last($syllables);
+            if ($last !== null && preg_match('/[\x{094D}\x{09CD}]\x{200D}?$/u', $syllables[$last])) {
+                $syllables[$last] .= $cluster;
+            } else {
+                $syllables[] = $cluster;
+            }
+        }
+        foreach ($syllables as $char) {
+            if ($buffer !== '' && $this->textItem($buffer . $char, $item['s'], 'w')['w'] > $w) {
                 $pieces[] = $this->textItem($buffer, $item['s'], 'w');
                 $buffer = '';
             }
@@ -2193,13 +2638,18 @@ final class HtmlPdf
         $descent = 0.0;
         foreach ($line['items'] as $it) {
             if ($it['t'] === 'img' || $it['t'] === 'svg' || $it['t'] === 'inline-box') {
-                $ascent = max($ascent, $it['h']);
+                $ascent = max($ascent, $it['h'] - ($it['baseline'] ?? 0.0));
+                $descent = max($descent, $it['baseline'] ?? 0.0);
                 continue;
             }
             $size = $it['s']['size'];
-            $half = ($size * $it['s']['lh'] - $size) / 2;
-            $ascent = max($ascent, $half + 0.8 * $size);
-            $descent = max($descent, $half + 0.2 * $size);
+            $font = $this->fontManager->getFont($it['s']['family'], $it['s']['bold'], $it['s']['italic'], $it['x'] ?? '');
+            $fontAscent = $font->getAscender($size);
+            $fontDescent = -$font->getDescender($size);
+            $lineHeight = $it['s']['lh'] === null ? $font->getLineHeight($size) : $size * $it['s']['lh'];
+            $half = ($lineHeight - $fontAscent - $fontDescent) / 2;
+            $ascent = max($ascent, $half + $fontAscent + $it['s']['shift']);
+            $descent = max($descent, $half + $fontDescent - $it['s']['shift']);
         }
         $height = $ascent + $descent;
 
@@ -2228,7 +2678,8 @@ final class HtmlPdf
 
         $run = null;
         foreach ($line['items'] as $it) {
-            if ($it['t'] === 'br') continue;
+            if ($it['t'] === 'br')
+                continue;
             $itemW = $it['w'] + ($it['t'] === 'sp' ? $extra : 0.0);
 
             if ($it['t'] === 'img') {
@@ -2238,12 +2689,24 @@ final class HtmlPdf
             } elseif ($it['t'] === 'svg') {
                 $this->flushRun($run, $base);
                 $run = null;
-                $this->ops[] = $it['ops'];
+                $svg = SvgRenderer::render($it['el'], $cx, $base - $it['h'], $it['w'], $it['h'], $this->pageH);
+                $this->ops[] = $svg['ops'];
             } elseif ($it['t'] === 'inline-box') {
                 $this->flushRun($run, $base);
                 $run = null;
-                $this->ops[] = InlineBox::renderBox($cx, $base - $it['h'], $it['w'], $it['h'], $it['s'], $this->pageH);
-                $this->renderChildren($it['el'], $it['s'], $cx, $it['w']);
+                $saved = [$this->y, $this->pending, $this->allowBreak];
+                $this->y = $base - $it['h'] + $it['baseline'];
+                $this->pending = 0.0;
+                $this->allowBreak = false;
+                if ($it['link'] !== null)
+                    $this->activeLinks[] = $it['link'];
+                try {
+                    $this->renderBox($it['el'], $it['s'], $cx, $it['w']);
+                } finally {
+                    if ($it['link'] !== null)
+                        array_pop($this->activeLinks);
+                    [$this->y, $this->pending, $this->allowBreak] = $saved;
+                }
             } elseif ($run !== null && $run['k'] === $it['k']) {
                 $run['text'] .= $it['x'];
                 $run['w'] += $itemW;
@@ -2259,7 +2722,8 @@ final class HtmlPdf
 
     private function flushRun(?array $run, float $base): void
     {
-        if ($run === null) return;
+        if ($run === null)
+            return;
         $s = $run['s'];
         $size = $s['size'];
         $b = $base - $s['shift'];
@@ -2326,7 +2790,8 @@ final class HtmlPdf
         }
 
         $item = $this->imageItem($el, $s, max(1.0, $w - $ml - $mr));
-        if ($item === null) return;
+        if ($item === null)
+            return;
         $align = $s['mAutoL'] && $s['mAutoR'] ? 'center' : ($s['mAutoL'] ? 'right' : 'left');
         $this->pending = max($this->pending, $mt);
         $items = [$item];
@@ -2352,13 +2817,24 @@ final class HtmlPdf
         $tw = $s['width'] !== null ? $this->px($s['width'], $w) : null;
         $th = is_float($s['height']) ? $s['height'] : null;
         $rendered = SvgRenderer::render($el, 0, 0, $tw, $th, $this->pageH);
-        return ['t' => 'svg', 'w' => $rendered['w'], 'h' => $rendered['h'], 'ops' => $rendered['ops'], 's' => $s, 'k' => 'svg'];
+        return ['t' => 'svg', 'w' => $rendered['w'], 'h' => $rendered['h'], 'el' => $el, 's' => $s, 'k' => 'svg'];
     }
 
     private function imageItem(DOMElement $el, array $s, float $w): ?array
     {
+        $source = $el->getAttribute('src');
+        if (preg_match('/\.svg(?:[?#].*)?$/i', $source) || str_starts_with($source, 'data:image/svg+xml')) {
+            $svg = $this->readSource($source);
+            if ($svg === null)
+                return null;
+            $width = $s['width'] === null ? null : $this->px($s['width'], $w);
+            $height = is_float($s['height']) ? $s['height'] : null;
+            $rendered = SvgRenderer::render($svg, 0, 0, $width, $height, $this->pageH);
+            return ['t' => 'svg', 'el' => $svg, 'w' => $rendered['w'], 'h' => $rendered['h'], 's' => $s, 'k' => 'svg'];
+        }
         $img = $this->loadImage($el->getAttribute('src'));
-        if ($img === null) return null;
+        if ($img === null)
+            return null;
         $natW = $img['w'] * self::PX;
         $natH = $img['h'] * self::PX;
         $tw = $s['width'] === null ? null : $this->px($s['width'], $w);
@@ -2375,6 +2851,15 @@ final class HtmlPdf
             $th *= $w / $tw;
             $tw = $w;
         }
+        if ($s['maxWidth'] !== null && $tw > $this->px($s['maxWidth'], $w)) {
+            $maxWidth = max(0.0, $this->px($s['maxWidth'], $w));
+            $th *= $maxWidth / $tw;
+            $tw = $maxWidth;
+        }
+        if (is_float($s['maxHeight']) && $th > $s['maxHeight']) {
+            $tw *= max(0.0, $s['maxHeight']) / $th;
+            $th = max(0.0, $s['maxHeight']);
+        }
         $radius = is_string($s['radius']) ? (float) $s['radius'] / 100 * min($tw, $th) : (float) $s['radius'];
 
         return ['t' => 'img', 'w' => $tw, 'h' => $th, 'res' => $img['name'], 'r' => $radius, 's' => $s, 'k' => 'img'];
@@ -2383,12 +2868,15 @@ final class HtmlPdf
     private function loadImage(string $src): ?array
     {
         $src = trim($src);
-        if ($src === '') return null;
-        if (array_key_exists($src, $this->imageCache)) return $this->imageCache[$src];
+        if ($src === '')
+            return null;
+        if (array_key_exists($src, $this->imageCache))
+            return $this->imageCache[$src];
 
         $data = $this->readSource($src);
         $info = $data !== null ? @getimagesizefromstring($data) : false;
-        if (!$info) return $this->imageCache[$src] = null;
+        if (!$info)
+            return $this->imageCache[$src] = null;
 
         [$width, $height] = $info;
         $name = 'I' . (count($this->images) + 1);
@@ -2396,13 +2884,14 @@ final class HtmlPdf
 
         if ($info[2] === IMAGETYPE_JPEG) {
             $channels = $info['channels'] ?? 3;
-            $space = match ($channels) { 1 => '/DeviceGray', 4 => '/DeviceCMYK', default => '/DeviceRGB' };
+            $space = match ($channels) { 1 => '/DeviceGray', 4 => '/DeviceCMYK', default => '/DeviceRGB'};
             $entry['dict'] = "/Type /XObject /Subtype /Image /Width $width /Height $height /ColorSpace $space /BitsPerComponent 8 /Filter /DCTDecode"
                 . ($channels === 4 ? ' /Decode [1 0 1 0 1 0 1 0]' : '');
             $entry['data'] = $data;
         } else {
             $decoded = $this->decodeWithGd($data, $width, $height);
-            if ($decoded === null) return $this->imageCache[$src] = null;
+            if ($decoded === null)
+                return $this->imageCache[$src] = null;
             [$rgb, $alpha] = $decoded;
             $entry['dict'] = "/Type /XObject /Subtype /Image /Width $width /Height $height /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode";
             $entry['data'] = gzcompress($rgb, 6);
@@ -2415,9 +2904,11 @@ final class HtmlPdf
 
     private function decodeWithGd(string $data, int $width, int $height): ?array
     {
-        if (!function_exists('imagecreatefromstring')) return null;
+        if (!function_exists('imagecreatefromstring'))
+            return null;
         $src = @imagecreatefromstring($data);
-        if ($src === false) return null;
+        if ($src === false)
+            return null;
         $im = imagecreatetruecolor($width, $height);
         imagealphablending($im, false);
         imagesavealpha($im, true);
@@ -2449,22 +2940,27 @@ final class HtmlPdf
     {
         if (str_starts_with($src, 'data:')) {
             $comma = strpos($src, ',');
-            if ($comma === false) return null;
+            if ($comma === false)
+                return null;
             $payload = substr($src, $comma + 1);
             $data = str_contains(substr($src, 0, $comma), ';base64') ? base64_decode($payload, false) : rawurldecode($payload);
             return $data === false || $data === '' ? null : $data;
         }
         if (preg_match('~^https?://~i', $src)) {
-            if (!$this->allowRemote) return null;
+            if (!$this->allowRemote)
+                return null;
             $data = @file_get_contents($src, false, stream_context_create(['http' => ['timeout' => 10]]));
             return $data === false ? null : $data;
         }
         $path = str_starts_with($src, 'file://') ? substr($src, 7) : $src;
+        if (str_contains($path, "\0") || preg_match('~^[a-z][a-z0-9+.-]*://~i', $path))
+            return null;
         if ($this->basePath !== null && !preg_match('~^(/|[A-Za-z]:[\\\\/])~', $path)) {
             $path = rtrim($this->basePath, '/\\') . '/' . $path;
         }
-        if (!is_file($path)) return null;
-        $data = file_get_contents($path);
+        if (!is_file($path) || !is_readable($path))
+            return null;
+        $data = @file_get_contents($path);
         return $data === false ? null : $data;
     }
 
@@ -2472,7 +2968,8 @@ final class HtmlPdf
 
     private function boxOps(float $x, float $y, float $w, float $h, array $s, array $sides = [true, true, true, true], bool $centered = false): string
     {
-        if ($w <= 0 || $h <= 0) return '';
+        if ($w <= 0 || $h <= 0)
+            return '';
         $out = '';
         $radius = is_string($s['radius']) ? (float) $s['radius'] / 100 * min($w, $h) : (float) $s['radius'];
 
@@ -2483,24 +2980,34 @@ final class HtmlPdf
         }
 
         if ($s['bg'] !== null) {
+            $background = $s['bg'];
+            $background[3] = ($background[3] ?? 1.0) * $s['opacity'];
             $out .= $radius > 0
-                ? sprintf("q %s rg %s f Q\n", $this->rg($s['bg']), $this->roundRect($x, $y, $w, $h, $radius))
-                : $this->fillOp($x, $y, $w, $h, $s['bg']);
+                ? sprintf("q %s%s rg %s f Q\n", $this->colorAlpha($background), $this->rg($background), $this->roundRect($x, $y, $w, $h, $radius))
+                : $this->fillOp($x, $y, $w, $h, $background);
         }
 
         $b = $s['border'];
+        foreach ($b as &$border) {
+            $border['c'][3] = ($border['c'][3] ?? 1.0) * $s['opacity'];
+        }
+        unset($border);
         $uniform = $b[0]['w'] > 0 && $b[0] == $b[1] && $b[1] == $b[2] && $b[2] == $b[3];
         if ($radius > 0 && $uniform && !in_array(false, $sides, true)) {
             $bw = $b[0]['w'];
             $out .= sprintf(
-                "q %s RG %s w %s %s S Q\n",
-                $this->rg($b[0]['c']), $this->n($bw), $this->dash($b[0]['s'], $bw),
+                "q %s%s RG %s w %s %s S Q\n",
+                $this->colorAlpha($b[0]['c']),
+                $this->rg($b[0]['c']),
+                $this->n($bw),
+                $this->dash($b[0]['s'], $bw),
                 $this->roundRect($x + $bw / 2, $y + $bw / 2, $w - $bw, $h - $bw, max(0.0, $radius - $bw / 2)),
             );
         } else {
             foreach ($b as $i => $side) {
                 $bw = $side['w'];
-                if ($bw <= 0 || !$sides[$i]) continue;
+                if ($bw <= 0 || !$sides[$i])
+                    continue;
                 $o = $centered ? 0.0 : $bw / 2;
                 [$x1, $y1, $x2, $y2] = match ($i) {
                     0 => [$x, $y + $o, $x + $w, $y + $o],
@@ -2509,9 +3016,15 @@ final class HtmlPdf
                     default => [$x + $o, $y, $x + $o, $y + $h],
                 };
                 $out .= sprintf(
-                    "q %s RG %s w %s %s %s m %s %s l S Q\n",
-                    $this->rg($side['c']), $this->n($bw), $this->dash($side['s'], $bw),
-                    $this->n($x1), $this->n($this->pageH - $y1), $this->n($x2), $this->n($this->pageH - $y2),
+                    "q %s%s RG %s w %s %s %s m %s %s l S Q\n",
+                    $this->colorAlpha($side['c']),
+                    $this->rg($side['c']),
+                    $this->n($bw),
+                    $this->dash($side['s'], $bw),
+                    $this->n($x1),
+                    $this->n($this->pageH - $y1),
+                    $this->n($x2),
+                    $this->n($this->pageH - $y2),
                 );
             }
         }
@@ -2534,7 +3047,15 @@ final class HtmlPdf
 
     private function fillOp(float $x, float $y, float $w, float $h, array $color): string
     {
-        return sprintf("q %s rg %s %s %s %s re f Q\n", $this->rg($color), $this->n($x), $this->n($this->pageH - $y - $h), $this->n($w), $this->n($h));
+        return sprintf("q %s%s rg %s %s %s %s re f Q\n", $this->colorAlpha($color), $this->rg($color), $this->n($x), $this->n($this->pageH - $y - $h), $this->n($w), $this->n($h));
+    }
+
+    private function colorAlpha(array $color): string
+    {
+        if (($color[3] ?? 1.0) >= 1.0)
+            return '';
+        $name = $this->graphicState->getAlphaState($color[3]);
+        return "/$name gs ";
     }
 
     private function roundRect(float $x, float $y, float $w, float $h, float $r): string
@@ -2548,24 +3069,57 @@ final class HtmlPdf
 
         return sprintf(
             '%s %s m %s %s l %s %s %s %s %s %s c %s %s l %s %s %s %s %s %s c %s %s l %s %s %s %s %s %s c %s %s l %s %s %s %s %s %s c h',
-            $n($x + $r), $n($top),
-            $n($right - $r), $n($top),
-            $n($right - $r + $k), $n($top), $n($right), $n($top - $r + $k), $n($right), $n($top - $r),
-            $n($right), $n($bottom + $r),
-            $n($right), $n($bottom + $r - $k), $n($right - $r + $k), $n($bottom), $n($right - $r), $n($bottom),
-            $n($x + $r), $n($bottom),
-            $n($x + $r - $k), $n($bottom), $n($x), $n($bottom + $r - $k), $n($x), $n($bottom + $r),
-            $n($x), $n($top - $r),
-            $n($x), $n($top - $r + $k), $n($x + $r - $k), $n($top), $n($x + $r), $n($top),
+            $n($x + $r),
+            $n($top),
+            $n($right - $r),
+            $n($top),
+            $n($right - $r + $k),
+            $n($top),
+            $n($right),
+            $n($top - $r + $k),
+            $n($right),
+            $n($top - $r),
+            $n($right),
+            $n($bottom + $r),
+            $n($right),
+            $n($bottom + $r - $k),
+            $n($right - $r + $k),
+            $n($bottom),
+            $n($right - $r),
+            $n($bottom),
+            $n($x + $r),
+            $n($bottom),
+            $n($x + $r - $k),
+            $n($bottom),
+            $n($x),
+            $n($bottom + $r - $k),
+            $n($x),
+            $n($bottom + $r),
+            $n($x),
+            $n($top - $r),
+            $n($x),
+            $n($top - $r + $k),
+            $n($x + $r - $k),
+            $n($top),
+            $n($x + $r),
+            $n($top),
         );
     }
 
     private function imageOp(array $item, float $x, float $top): string
     {
+        if ($item['t'] === 'svg') {
+            return SvgRenderer::render($item['el'], $x, $top, $item['w'], $item['h'], $this->pageH)['ops'];
+        }
         $clip = $item['r'] > 0 ? $this->roundRect($x, $top, $item['w'], $item['h'], $item['r']) . ' W n ' : '';
         return sprintf(
             "q %s%s 0 0 %s %s %s cm /%s Do Q\n",
-            $clip, $this->n($item['w']), $this->n($item['h']), $this->n($x), $this->n($this->pageH - $top - $item['h']), $item['res'],
+            $clip,
+            $this->n($item['w']),
+            $this->n($item['h']),
+            $this->n($x),
+            $this->n($this->pageH - $top - $item['h']),
+            $item['res'],
         );
     }
 
@@ -2575,17 +3129,44 @@ final class HtmlPdf
         $fontRes = $this->fontManager->getResourceName($font);
 
         $charSpaceOp = ($s['letter-spacing'] ?? 0.0) != 0.0 ? $this->n($s['letter-spacing']) . ' Tc ' : '';
-        $effectiveWordSpace = $wordSpace > 0 ? $wordSpace : ($s['word-spacing'] ?? 0.0);
+        $effectiveWordSpace = $wordSpace + ($s['word-spacing'] ?? 0.0);
         $wordSpaceOp = $effectiveWordSpace != 0.0 ? $this->n($effectiveWordSpace) . ' Tw ' : '';
+        $showText = $font->encode($text) . ' Tj';
+        if ($font instanceof \Spark\Pdf\Font\TrueTypeFont && $effectiveWordSpace != 0.0 && $s['size'] > 0) {
+            $parts = explode(' ', $text);
+            $encoded = [];
+            foreach ($parts as $i => $part) {
+                if ($i > 0) {
+                    $encoded[] = $font->encode(' ');
+                    $encoded[] = $this->n(-1000 * $effectiveWordSpace / $s['size']);
+                }
+                $encoded[] = $font->encode($part);
+            }
+            $showText = '[' . implode(' ', $encoded) . '] TJ';
+            $wordSpaceOp = '';
+        }
 
-        return sprintf(
-            "q BT /%s %s Tf %s rg %s %s Td %s%s%s Tj ET Q\n",
-            $fontRes, $this->n($s['size']), $this->rg($s['color']),
-            $this->n($x), $this->n($this->pageH - $baseline),
+        $operation = sprintf(
+            "q BT /%s %s Tf %s rg %s %s Td %s%s%s ET Q\n",
+            $fontRes,
+            $this->n($s['size']),
+            $this->rg($s['color']),
+            $this->n($x),
+            $this->n($this->pageH - $baseline),
             $charSpaceOp,
             $wordSpaceOp,
-            $font->encode($text),
+            $showText,
         );
+        if (($s['color'][3] ?? 1.0) < 1.0) {
+            $color = $s['color'];
+            $color[3] *= $s['opacity'];
+            $operation = 'q ' . $this->colorAlpha($color) . $operation . "Q\n";
+        }
+        if ($font instanceof \Spark\Pdf\Font\TrueTypeFont) {
+            $actualText = strtoupper(bin2hex(mb_convert_encoding($text, 'UTF-16BE', 'UTF-8')));
+            $operation = "/Span << /ActualText <FEFF$actualText> >> BDC\n" . $operation . "EMC\n";
+        }
+        return $operation;
     }
 
     private function n(float $v): string

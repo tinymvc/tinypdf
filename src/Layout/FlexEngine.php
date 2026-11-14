@@ -74,9 +74,7 @@ final class FlexEngine
             if ($flex > 0) {
                 $totalFlex += $flex;
             } elseif ($item['s']['width'] !== null) {
-                $w = is_string($item['s']['width']) && str_ends_with($item['s']['width'], '%')
-                    ? ((float) $item['s']['width'] / 100) * $cw
-                    : (float) $item['s']['width'];
+                $w = $item['naturalW'];
                 $itemWidths[$i] = $w;
                 $usedFixedW += $w;
             } else {
@@ -91,6 +89,13 @@ final class FlexEngine
             $flex = (float) ($item['s']['flex'] ?? ($item['s']['flex-grow'] ?? 0.0));
             if ($flex > 0) {
                 $itemWidths[$i] = $totalFlex > 0 ? ($flex / $totalFlex) * $freeW : 0.0;
+            }
+        }
+
+        $totalWidth = array_sum($itemWidths);
+        if ($totalWidth > $availW && $totalWidth > 0) {
+            foreach ($itemWidths as $i => $width) {
+                $itemWidths[$i] = $width * $availW / $totalWidth;
             }
         }
 
@@ -169,9 +174,7 @@ final class FlexEngine
 
         foreach ($items as $idx => $item) {
             $w = $item['s']['width'] !== null
-                ? (is_string($item['s']['width']) && str_ends_with($item['s']['width'], '%')
-                    ? ((float) $item['s']['width'] / 100) * $cw
-                    : (float) $item['s']['width'])
+                ? $item['naturalW']
                 : ($align === 'stretch' ? $cw : $item['naturalW']);
 
             $x = $cx;

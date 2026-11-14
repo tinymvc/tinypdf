@@ -18,9 +18,6 @@ final class FontManager
     /** @var array<string, array<string, string>> family => [styleKey => fontPath] */
     private array $customPaths = [];
 
-    /** @var array<string, string> list of all registered custom font paths */
-    private array $allCustomFonts = [];
-
     /**
      * Registers a custom TrueType/OpenType font family (e.g. for Bangla, Chinese, Japanese, Arabic, etc.).
      *
@@ -34,7 +31,6 @@ final class FontManager
         $family = strtolower(trim($family));
         $styleKey = ($bold ? 'b' : '') . ($italic ? 'i' : '');
         $this->customPaths[$family][$styleKey] = $path;
-        $this->allCustomFonts[$family] = $path;
 
         return $this;
     }
@@ -46,25 +42,25 @@ final class FontManager
      */
     public function getFont(string $family, bool $bold = false, bool $italic = false, string $text = ''): FontInterface
     {
-        $candidates = array_filter(
+        $candidates = array_values(array_filter(
             array_map(static fn($f) => strtolower(trim($f, " \t\n\r\0\x0B'\"")), explode(',', $family)),
             static fn($f) => $f !== ''
-        );
+        ));
         if (empty($candidates)) {
             $candidates = ['helvetica'];
         }
 
         $styleKey = ($bold ? 'b' : '') . ($italic ? 'i' : '');
-        $firstCustomFont = null;
 
         // 1. Iterate over candidate font families in the CSS font stack
         foreach ($candidates as $cand) {
             if (isset($this->customPaths[$cand])) {
-                $path = $this->customPaths[$cand][$styleKey]
-                    ?? $this->customPaths[$cand]['']
-                    ?? reset($this->customPaths[$cand]);
-                $font = $this->loadTrueType($cand, $path, $bold, $italic);
-                $firstCustomFont ??= $font;
+                $styles = $this->customPaths[$cand];
+                $selected = $styleKey;
+                if (!isset($styles[$selected])) {
+                    $selected = isset($styles['']) ? '' : array_key_first($styles);
+                }
+                $font = $this->loadTrueType($cand, $styles[$selected], str_contains($selected, 'b'), str_contains($selected, 'i'));
 
                 // If text is empty or this font supports the glyphs, choose it
                 if ($text === '' || $font->supportsText($text)) {
@@ -78,76 +74,43 @@ final class FontManager
             }
         }
 
-        // If a font in the user's stack was found and text has no non-Latin script, return it
-        if ($firstCustomFont !== null && !self::isNonLatinText($text)) {
-            return $firstCustomFont;
-        }
-
-        // 2. Script-based routing across all registered custom fonts
-        if (!empty($this->allCustomFonts)) {
-            // Check if text is Bengali / Indic
-            if (BengaliShaper::containsBengali($text)) {
-                foreach ($this->allCustomFonts as $name => $path) {
-                    if (str_contains($name, 'bangla') || str_contains($name, 'kalpurush') || str_contains($name, 'solaiman')) {
-                        return $this->loadTrueType($name, $path, $bold, $italic);
-                    }
-                }
+        // Fallbacks must cover the text; a family name alone says nothing about coverage.
+        foreach ($this->customPaths as $name => $styles) {
+            $selected = $styleKey;
+            if (!isset($styles[$selected])) {
+                $selected = isset($styles['']) ? '' : array_key_first($styles);
             }
-
-            // Check if text is Arabic
-            if (ArabicShaper::containsArabic($text)) {
-                foreach ($this->allCustomFonts as $name => $path) {
-                    if (str_contains($name, 'arabic') || str_contains($name, 'amiri') || str_contains($name, 'scheherazade')) {
-                        return $this->loadTrueType($name, $path, $bold, $italic);
-                    }
-                }
-            }
-
-            // Check if any registered custom font supports the glyphs in this text
-            foreach ($this->allCustomFonts as $name => $path) {
-                $font = $this->loadTrueType($name, $path, $bold, $italic);
-                if ($font->supportsText($text)) {
-                    return $font;
-                }
-            }
-
-            // If non-Latin and user has registered fonts, use the first custom font
-            if (self::isNonLatinText($text)) {
-                $firstFamily = array_key_first($this->allCustomFonts);
-                return $this->loadTrueType($firstFamily, $this->allCustomFonts[$firstFamily], $bold, $italic);
+            $font = $this->loadTrueType($name, $styles[$selected], str_contains($selected, 'b'), str_contains($selected, 'i'));
+            if ($font->supportsText($text)) {
+                return $font;
             }
         }
 
-        // 3. System font discovery for non-Latin scripts as automatic convenience
-        if (self::isNonLatinText($text)) {
-            $systemFont = $this->findSystemFont($text);
-            if ($systemFont !== null) {
-                return $this->loadTrueType('sys_font', $systemFont, $bold, $italic);
-            }
-        }
-
-        // 4. Default to Standard Adobe Core Type 1 Fonts (Helvetica, Times, Courier)
-        // Keeps PDF file size microscopic (~2KB) with zero font embedding overhead
         $primaryFamily = $candidates[0] ?? 'helvetica';
-        return $this->loadCoreFont($primaryFamily, $bold, $italic);
-    }
-
-    private static function isNonLatinText(string $text): bool
-    {
-        if ($text === '') {
-            return false;
+        $core = $this->loadCoreFont($primaryFamily, $bold, $italic);
+        if ($core->supportsText($text)) {
+            return $core;
         }
-        // Non-Latin Unicode scripts: Cyrillic, Hebrew, Arabic, Devanagari, Bengali, Gurmukhi,
-        // Gujarati, Oriya, Tamil, Telugu, Kannada, Malayalam, Thai, CJK, Hangul, etc.
-        return (bool) preg_match('/[\x{0400}-\x{04FF}\x{0590}-\x{05FF}\x{0600}-\x{06FF}\x{0750}-\x{077F}\x{0900}-\x{097F}\x{0980}-\x{09FF}\x{0A00}-\x{0A7F}\x{0A80}-\x{0AFF}\x{0B00}-\x{0B7F}\x{0B80}-\x{0BFF}\x{0C00}-\x{0C7F}\x{0C80}-\x{0CFF}\x{0D00}-\x{0D7F}\x{0E00}-\x{0E7F}\x{1000}-\x{109F}\x{3040}-\x{30FF}\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}\x{AC00}-\x{D7AF}]/u', $text);
+        foreach ($this->findSystemFonts($text) as $path) {
+            try {
+                $font = $this->loadTrueType('system', $path, false, false);
+            } catch (\RuntimeException) {
+                continue;
+            }
+            if ($font->supportsText($text)) {
+                return $font;
+            }
+        }
+
+        throw new \RuntimeException('No font covers the requested text. Register a matching font with addFont() or @font-face.');
     }
 
     private function isCoreFontFamily(string $family): bool
     {
-        return (bool) preg_match('/^(helvetica|arial|sans-serif|times|georgia|garamond|palatino|serif|courier|mono|consolas|menlo|monospace)$/i', $family);
+        return (bool) preg_match('/^(helvetica|arial|sans-serif|times|times new roman|georgia|garamond|palatino|serif|courier|mono|consolas|menlo|monospace)$/i', $family);
     }
 
-    private function findSystemFont(string $text): ?string
+    private function findSystemFonts(string $text): array
     {
         $paths = [];
 
@@ -160,6 +123,7 @@ final class FontManager
                 '/usr/share/fonts/truetype/lohit-bengali/Lohit-Bengali.ttf',
                 '/usr/share/fonts/truetype/noto/NotoSansBengali-Regular.ttf',
                 '/usr/share/fonts/google-noto/NotoSansBengali-Regular.ttf',
+                '/System/Library/Fonts/Supplemental/Bangla Sangam MN.ttc',
             ];
         } elseif (ArabicShaper::containsArabic($text)) {
             $paths = [
@@ -180,6 +144,7 @@ final class FontManager
                 // Linux
                 '/usr/share/fonts/truetype/lohit-devanagari/Lohit-Devanagari.ttf',
                 '/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf',
+                '/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc',
             ];
         } elseif (preg_match('/[\x{4E00}-\x{9FFF}\x{3040}-\x{30FF}\x{AC00}-\x{D7AF}]/u', $text)) {
             $paths = [
@@ -198,12 +163,13 @@ final class FontManager
             ];
         }
 
-        foreach ($paths as $path) {
-            if (is_file($path)) {
-                return $path;
-            }
-        }
-        return null;
+        $paths = array_merge($paths, [
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+            '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+            '/Library/Fonts/Arial Unicode.ttf',
+            'C:/Windows/Fonts/arial.ttf',
+        ]);
+        return array_values(array_filter($paths, 'is_file'));
     }
 
     public function getResourceName(FontInterface $font): string
@@ -218,7 +184,7 @@ final class FontManager
 
     private function loadTrueType(string $family, string $path, bool $bold, bool $italic): FontInterface
     {
-        $key = sprintf('ttf_%s_%d_%d', $family, (int) $bold, (int) $italic);
+        $key = sprintf('ttf_%s_%d_%d', $path, (int) $bold, (int) $italic);
         if (!isset($this->fonts[$key])) {
             $this->fonts[$key] = new TrueTypeFont($path, $bold, $italic);
         }
@@ -229,29 +195,29 @@ final class FontManager
     {
         $baseFamily = match (true) {
             (bool) preg_match('/courier|mono|consolas|menlo/', $family) => 'courier',
-            (bool) preg_match('/times|georgia|garamond|palatino|serif/', $family) => 'times',
+            (bool) preg_match('/^(times|times new roman|georgia|garamond|palatino|serif)$/', $family) => 'times',
             default => 'helvetica',
         };
 
         $baseName = match ($baseFamily) {
             'times' => match (true) {
-                $bold && $italic => 'Times-BoldItalic',
-                $bold => 'Times-Bold',
-                $italic => 'Times-Italic',
-                default => 'Times-Roman',
-            },
+                    $bold && $italic => 'Times-BoldItalic',
+                    $bold => 'Times-Bold',
+                    $italic => 'Times-Italic',
+                    default => 'Times-Roman',
+                },
             'courier' => match (true) {
-                $bold && $italic => 'Courier-BoldOblique',
-                $bold => 'Courier-Bold',
-                $italic => 'Courier-Oblique',
-                default => 'Courier',
-            },
+                    $bold && $italic => 'Courier-BoldOblique',
+                    $bold => 'Courier-Bold',
+                    $italic => 'Courier-Oblique',
+                    default => 'Courier',
+                },
             default => match (true) {
-                $bold && $italic => 'Helvetica-BoldOblique',
-                $bold => 'Helvetica-Bold',
-                $italic => 'Helvetica-Oblique',
-                default => 'Helvetica',
-            },
+                    $bold && $italic => 'Helvetica-BoldOblique',
+                    $bold => 'Helvetica-Bold',
+                    $italic => 'Helvetica-Oblique',
+                    default => 'Helvetica',
+                },
         };
 
         $key = 'core_' . $baseName;
@@ -265,6 +231,8 @@ final class FontManager
     {
         $resStr = '';
         foreach ($this->fonts as $font) {
+            if (!isset($this->resources[spl_object_hash($font)]))
+                continue;
             $resName = $this->getResourceName($font);
             $fontObjs = $font->getPdfFontObjects($nextId, $resName);
             $primaryId = array_key_last($fontObjs);

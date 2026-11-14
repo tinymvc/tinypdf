@@ -57,6 +57,33 @@ function throws(string $class, Closure $callback): void
     throw new RuntimeException("Expected {$class}.");
 }
 
+function testFont(string $script): string
+{
+    $paths = match ($script) {
+        'bengali' => [
+            getenv('TINYPDF_BENGALI_FONT') ?: '',
+            'C:/Windows/Fonts/kalpurush.ttf',
+            '/usr/share/fonts/truetype/noto/NotoSansBengali-Regular.ttf',
+            '/System/Library/Fonts/Supplemental/Bangla Sangam MN.ttc',
+        ],
+        'cjk' => [
+            getenv('TINYPDF_CJK_FONT') ?: '',
+            'C:/Windows/Fonts/simsun.ttc',
+            '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+            '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+        ],
+        default => [],
+    };
+    foreach ($paths as $path) {
+        if (is_file($path))
+            return $path;
+    }
+    if (getenv('TINYPDF_REQUIRE_FONTS')) {
+        throw new RuntimeException("Required $script test font is missing.");
+    }
+    skip("No $script test font installed; set TINYPDF_" . strtoupper($script) . '_FONT.');
+}
+
 foreach (glob(__DIR__ . '/*Test.php') as $file) {
     if (isset($argv[1]) && !str_contains(basename($file), $argv[1])) {
         continue;

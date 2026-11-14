@@ -14,16 +14,44 @@ final class Color
 {
     /** @var array<string, array{0: int, 1: int, 2: int}> */
     private const NAMES = [
-        'black' => [0, 0, 0], 'white' => [255, 255, 255], 'red' => [255, 0, 0], 'green' => [0, 128, 0],
-        'blue' => [0, 0, 255], 'gray' => [128, 128, 128], 'grey' => [128, 128, 128], 'silver' => [192, 192, 192],
-        'yellow' => [255, 255, 0], 'orange' => [255, 165, 0], 'purple' => [128, 0, 128], 'navy' => [0, 0, 128],
-        'teal' => [0, 128, 128], 'maroon' => [128, 0, 0], 'lime' => [0, 255, 0], 'aqua' => [0, 255, 255],
-        'cyan' => [0, 255, 255], 'fuchsia' => [255, 0, 255], 'magenta' => [255, 0, 255], 'olive' => [128, 128, 0],
-        'brown' => [165, 42, 42], 'pink' => [255, 192, 203], 'gold' => [255, 215, 0], 'crimson' => [220, 20, 60],
-        'indigo' => [75, 0, 130], 'coral' => [255, 127, 80], 'tomato' => [255, 99, 71], 'whitesmoke' => [245, 245, 245],
-        'lightgray' => [211, 211, 211], 'lightgrey' => [211, 211, 211], 'darkgray' => [169, 169, 169],
-        'darkgrey' => [169, 169, 169], 'darkblue' => [0, 0, 139], 'darkgreen' => [0, 100, 0], 'darkred' => [139, 0, 0],
-        'lightblue' => [173, 216, 230], 'lightgreen' => [144, 238, 144], 'lightyellow' => [255, 255, 224],
+        'black' => [0, 0, 0],
+        'white' => [255, 255, 255],
+        'red' => [255, 0, 0],
+        'green' => [0, 128, 0],
+        'blue' => [0, 0, 255],
+        'gray' => [128, 128, 128],
+        'grey' => [128, 128, 128],
+        'silver' => [192, 192, 192],
+        'yellow' => [255, 255, 0],
+        'orange' => [255, 165, 0],
+        'purple' => [128, 0, 128],
+        'navy' => [0, 0, 128],
+        'teal' => [0, 128, 128],
+        'maroon' => [128, 0, 0],
+        'lime' => [0, 255, 0],
+        'aqua' => [0, 255, 255],
+        'cyan' => [0, 255, 255],
+        'fuchsia' => [255, 0, 255],
+        'magenta' => [255, 0, 255],
+        'olive' => [128, 128, 0],
+        'brown' => [165, 42, 42],
+        'pink' => [255, 192, 203],
+        'gold' => [255, 215, 0],
+        'crimson' => [220, 20, 60],
+        'indigo' => [75, 0, 130],
+        'coral' => [255, 127, 80],
+        'tomato' => [255, 99, 71],
+        'whitesmoke' => [245, 245, 245],
+        'lightgray' => [211, 211, 211],
+        'lightgrey' => [211, 211, 211],
+        'darkgray' => [169, 169, 169],
+        'darkgrey' => [169, 169, 169],
+        'darkblue' => [0, 0, 139],
+        'darkgreen' => [0, 100, 0],
+        'darkred' => [139, 0, 0],
+        'lightblue' => [173, 216, 230],
+        'lightgreen' => [144, 238, 144],
+        'lightyellow' => [255, 255, 224],
     ];
 
     /**
@@ -45,7 +73,10 @@ final class Color
             return null;
         }
         $v = strtolower(trim($value));
-        if ($v === '' || $v === 'transparent' || $v === 'none') {
+        if ($v === 'transparent') {
+            return new self([0, 0, 0], 0.0);
+        }
+        if ($v === '' || $v === 'none') {
             return null;
         }
 
@@ -127,11 +158,16 @@ final class Color
         $p = 2 * $l - $q;
 
         $hue2rgb = static function (float $p, float $q, float $t): float {
-            if ($t < 0) $t += 1;
-            if ($t > 1) $t -= 1;
-            if ($t < 1 / 6) return $p + ($q - $p) * 6 * $t;
-            if ($t < 1 / 2) return $q;
-            if ($t < 2 / 3) return $p + ($q - $p) * (2 / 3 - $t) * 6;
+            if ($t < 0)
+                $t += 1;
+            if ($t > 1)
+                $t -= 1;
+            if ($t < 1 / 6)
+                return $p + ($q - $p) * 6 * $t;
+            if ($t < 1 / 2)
+                return $q;
+            if ($t < 2 / 3)
+                return $p + ($q - $p) * (2 / 3 - $t) * 6;
             return $p;
         };
 

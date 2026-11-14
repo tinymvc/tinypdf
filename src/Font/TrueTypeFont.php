@@ -6,11 +6,12 @@ namespace Spark\Pdf\Font;
 
 use RuntimeException;
 use function count;
+use function in_array;
 use function sprintf;
 use function strlen;
 
 /**
- * Universal TrueType / OpenType font parser and PDF CIDFontType2 / Type0 embedder.
+ * TrueType-outline font parser and PDF CIDFontType2 / Type0 embedder.
  * Supports .ttf, .otf, and .ttc (TrueType Collection) fonts for global language coverage
  * (Bangla, Chinese, Japanese, Korean, Arabic, Cyrillic, Latin-Extended).
  */
@@ -41,6 +42,7 @@ final class TrueTypeFont implements FontInterface
 
     /** @var array<int, int|string> glyphId => unicode codepoint or UTF-16BE hex */
     private array $glyphToUnicode = [];
+    private array $shapedText = [];
 
     public function __construct(
         private readonly string $fontPath,
@@ -72,6 +74,9 @@ final class TrueTypeFont implements FontInterface
         }
 
         $this->baseOffset = 0;
+        if ($magic !== "\0\1\0\0" && $magic !== 'true') {
+            throw new RuntimeException('Unsupported font outlines: use a TrueType font (TTF, TrueType WOFF or TTC), not CFF/WOFF2.');
+        }
 
         $numTables = $this->readUint16($this->baseOffset + 4);
         $tables = [];
@@ -80,6 +85,7 @@ final class TrueTypeFont implements FontInterface
             $tag = substr($this->data, $offset, 4);
             $to = $this->readUint32($offset + 8);
             $tl = $this->readUint32($offset + 12);
+            $this->checkBounds($to, $tl);
             $tables[$tag] = ['offset' => $to, 'length' => $tl];
         }
 
@@ -89,6 +95,9 @@ final class TrueTypeFont implements FontInterface
         }
         $headOff = $tables['head']['offset'];
         $this->unitsPerEm = $this->readUint16($headOff + 18);
+        if ($this->unitsPerEm < 16 || $this->unitsPerEm > 16384) {
+            throw new RuntimeException('Invalid font unitsPerEm.');
+        }
         $xMin = $this->readInt16($headOff + 36);
         $yMin = $this->readInt16($headOff + 38);
         $xMax = $this->readInt16($headOff + 40);
@@ -108,6 +117,9 @@ final class TrueTypeFont implements FontInterface
         // 3. maxp table
         $maxpOff = $tables['maxp']['offset'] ?? throw new RuntimeException("Missing 'maxp' table");
         $this->numGlyphs = $this->readUint16($maxpOff + 4);
+        if ($this->numberOfHMetrics < 1 || $this->numberOfHMetrics > $this->numGlyphs) {
+            throw new RuntimeException('Invalid font horizontal metrics.');
+        }
 
         // 4. hmtx table (horizontal metrics)
         $hmtxOff = $tables['hmtx']['offset'] ?? throw new RuntimeException("Missing 'hmtx' table");
@@ -204,7 +216,8 @@ final class TrueTypeFont implements FontInterface
             $ro = $this->readUint16($idRangeOffset + $s * 2);
 
             for ($c = $start; $c <= $end; $c++) {
-                if ($c === 0xFFFF) break;
+                if ($c === 0xFFFF)
+                    break;
                 if ($ro === 0) {
                     $gid = ($c + $delta) & 0xFFFF;
                 } else {
@@ -228,6 +241,9 @@ final class TrueTypeFont implements FontInterface
             $startCharCode = $this->readUint32($subOff + 16 + $i * 12);
             $endCharCode = $this->readUint32($subOff + 20 + $i * 12);
             $startGlyphId = $this->readUint32($subOff + 24 + $i * 12);
+            if ($startCharCode > $endCharCode || $endCharCode > 0x10FFFF) {
+                throw new RuntimeException('Invalid Unicode cmap range.');
+            }
 
             for ($c = $startCharCode; $c <= $endCharCode; $c++) {
                 $gid = (int) ($startGlyphId + ($c - $startCharCode));
@@ -240,10 +256,27 @@ final class TrueTypeFont implements FontInterface
 
     private function parseGsub(int $gsubOffset): void
     {
+        $featuresOffset = $gsubOffset + $this->readUint16($gsubOffset + 6);
+        $featureCount = $this->readUint16($featuresOffset);
+        $enabledLookups = [];
+        $defaultFeatures = ['ccmp', 'liga', 'rlig', 'akhn', 'rphf', 'pref', 'blwf', 'half', 'pstf', 'vatu', 'cjct', 'pres', 'abvs', 'blws', 'psts'];
+        for ($i = 0; $i < $featureCount; $i++) {
+            $record = $featuresOffset + 2 + $i * 6;
+            $tag = substr($this->data, $record, 4);
+            if (!in_array($tag, $defaultFeatures, true))
+                continue;
+            $feature = $featuresOffset + $this->readUint16($record + 4);
+            $count = $this->readUint16($feature + 2);
+            for ($j = 0; $j < $count; $j++) {
+                $enabledLookups[$this->readUint16($feature + 4 + $j * 2)] = true;
+            }
+        }
         $lookupListOffset = $gsubOffset + $this->readUint16($gsubOffset + 8);
         $lookupCount = $this->readUint16($lookupListOffset);
 
         for ($i = 0; $i < $lookupCount; $i++) {
+            if (!isset($enabledLookups[$i]))
+                continue;
             $lookupOff = $lookupListOffset + $this->readUint16($lookupListOffset + 2 + $i * 2);
             $type = $this->readUint16($lookupOff);
             $subCount = $this->readUint16($lookupOff + 4);
@@ -274,7 +307,8 @@ final class TrueTypeFont implements FontInterface
 
         for ($i = 0; $i < $ligSetCount; $i++) {
             $firstGid = $firstGlyphs[$i] ?? null;
-            if ($firstGid === null) continue;
+            if ($firstGid === null)
+                continue;
 
             $ligSetOff = $subOff + $this->readUint16($subOff + 6 + $i * 2);
             $ligCount = $this->readUint16($ligSetOff);
@@ -291,7 +325,9 @@ final class TrueTypeFont implements FontInterface
             }
 
             // Sort ligatures by number of components descending (longest match first)
-            usort($this->ligatures[$firstGid], static fn($a, $b) => count($b['comps']) <=> count($a['comps']));
+            if (isset($this->ligatures[$firstGid])) {
+                usort($this->ligatures[$firstGid], static fn($a, $b) => count($b['comps']) <=> count($a['comps']));
+            }
         }
     }
 
@@ -319,7 +355,10 @@ final class TrueTypeFont implements FontInterface
 
     public function shapeText(string $text): array
     {
-        if (BengaliShaper::containsBengali($text)) {
+        if (isset($this->shapedText[$text])) {
+            return $this->shapedText[$text];
+        }
+        if (BengaliShaper::containsBengali($text) || BengaliShaper::containsDevanagari($text)) {
             $charList = BengaliShaper::shape($text);
         } elseif (ArabicShaper::containsArabic($text)) {
             $charList = mb_str_split(ArabicShaper::shape($text));
@@ -345,6 +384,9 @@ final class TrueTypeFont implements FontInterface
 
         foreach ($gids as $gid) {
             $this->usedGlyphs[$gid] = true;
+        }
+        if (count($this->shapedText) < 2048) {
+            $this->shapedText[$text] = $gids;
         }
 
         return $gids;
@@ -378,7 +420,7 @@ final class TrueTypeFont implements FontInterface
                         $out[] = $rule['lig'];
                         $uniHex = '';
                         for ($u = 0; $u <= $compCount; $u++) {
-                            $uniHex .= sprintf('%04X', $unicodes[$i + $u] ?? 0);
+                            $uniHex .= strtoupper(bin2hex(mb_convert_encoding(mb_chr($unicodes[$i + $u] ?? 0), 'UTF-16BE', 'UTF-8')));
                         }
                         $this->glyphToUnicode[$rule['lig']] = $uniHex;
 
@@ -461,27 +503,15 @@ final class TrueTypeFont implements FontInterface
     {
         $objects = [];
 
-        // 1. Font file stream: /FontFile3 for OpenType CFF (OTTO), /FontFile2 for TrueType
-        $isCff = (substr($this->data, 0, 4) === 'OTTO');
         $fontFileId = ++$nextId;
         $compressedFont = gzcompress($this->data, 6);
-
-        if ($isCff) {
-            $objects[$fontFileId] = sprintf(
-                "<< /Length %d /Subtype /OpenType /Filter /FlateDecode >>\nstream\n%s\nendstream",
-                strlen($compressedFont),
-                $compressedFont
-            );
-            $fontFileRef = sprintf('/FontFile3 %d 0 R', $fontFileId);
-        } else {
-            $objects[$fontFileId] = sprintf(
-                "<< /Length %d /Length1 %d /Filter /FlateDecode >>\nstream\n%s\nendstream",
-                strlen($compressedFont),
-                strlen($this->data),
-                $compressedFont
-            );
-            $fontFileRef = sprintf('/FontFile2 %d 0 R', $fontFileId);
-        }
+        $objects[$fontFileId] = sprintf(
+            "<< /Length %d /Length1 %d /Filter /FlateDecode >>\nstream\n%s\nendstream",
+            strlen($compressedFont),
+            strlen($this->data),
+            $compressedFont
+        );
+        $fontFileRef = sprintf('/FontFile2 %d 0 R', $fontFileId);
 
         // 2. Font descriptor
         $descId = ++$nextId;
@@ -495,7 +525,8 @@ final class TrueTypeFont implements FontInterface
             (int) round($this->bbox[3] * $scale),
         ];
         $flags = 4;
-        if ($this->italic) $flags |= 64;
+        if ($this->italic)
+            $flags |= 64;
 
         $objects[$descId] = sprintf(
             "<< /Type /FontDescriptor /FontName /%s /Flags %d /FontBBox [%s] /Ascent %d /Descent %d /CapHeight %d /StemV 80 %s >>",
@@ -566,8 +597,10 @@ final class TrueTypeFont implements FontInterface
 
     private function unpackWoff(string $woff): string
     {
+        $this->checkBounds(0, 44);
         $flavor = substr($woff, 4, 4);
-        $numTables = unpack('n', substr($woff, 12, 2))[1];
+        $numTables = $this->readUint16(12);
+        $this->checkBounds(44, $numTables * 20);
         $header = $flavor . pack('nnnn', $numTables, 0, 0, 0);
         $tableRecords = '';
         $tableData = '';
@@ -580,10 +613,14 @@ final class TrueTypeFont implements FontInterface
             $compLen = unpack('N', substr($woff, $recOff + 8, 4))[1];
             $origLen = unpack('N', substr($woff, $recOff + 12, 4))[1];
             $origSum = unpack('N', substr($woff, $recOff + 16, 4))[1];
+            $this->checkBounds($to, $compLen);
+            if ($origLen > 64 * 1024 * 1024 || $compLen > $origLen) {
+                throw new RuntimeException('Invalid WOFF table length.');
+            }
 
             $chunk = substr($woff, $to, $compLen);
-            $decompressed = $compLen < $origLen ? @gzuncompress($chunk) : $chunk;
-            if ($decompressed === false) {
+            $decompressed = $compLen < $origLen ? @gzuncompress($chunk, $origLen) : $chunk;
+            if ($decompressed === false || strlen($decompressed) !== $origLen) {
                 throw new RuntimeException("Corrupted WOFF font table: $tag");
             }
 
@@ -600,13 +637,17 @@ final class TrueTypeFont implements FontInterface
 
     private function extractTtcFont(string $ttc, int $fontIndex = 0): string
     {
-        $numFonts = unpack('N', substr($ttc, 8, 4))[1];
+        $numFonts = $this->readUint32(8);
+        if ($numFonts < 1) {
+            throw new RuntimeException('Empty TrueType collection.');
+        }
         if ($fontIndex >= $numFonts) {
             $fontIndex = 0;
         }
-        $fontOffset = unpack('N', substr($ttc, 12 + $fontIndex * 4, 4))[1];
+        $fontOffset = $this->readUint32(12 + $fontIndex * 4);
         $sfntVer = substr($ttc, $fontOffset, 4);
-        $numTables = unpack('n', substr($ttc, $fontOffset + 4, 2))[1];
+        $numTables = $this->readUint16($fontOffset + 4);
+        $this->checkBounds($fontOffset, 12 + $numTables * 16);
         $header = $sfntVer . substr($ttc, $fontOffset + 4, 8);
 
         $tableRecords = '';
@@ -619,6 +660,7 @@ final class TrueTypeFont implements FontInterface
             $checksum = substr($ttc, $recOff + 4, 4);
             $to = unpack('N', substr($ttc, $recOff + 8, 4))[1];
             $tl = unpack('N', substr($ttc, $recOff + 12, 4))[1];
+            $this->checkBounds($to, $tl);
 
             $chunk = substr($ttc, $to, $tl);
             $padLen = (4 - (strlen($chunk) % 4)) % 4;
@@ -634,17 +676,26 @@ final class TrueTypeFont implements FontInterface
 
     private function readUint16(int $offset): int
     {
+        $this->checkBounds($offset, 2);
         return unpack('n', substr($this->data, $offset, 2))[1];
     }
 
     private function readInt16(int $offset): int
     {
-        $v = unpack('n', substr($this->data, $offset, 2))[1];
+        $v = $this->readUint16($offset);
         return $v >= 0x8000 ? $v - 0x10000 : $v;
     }
 
     private function readUint32(int $offset): int
     {
+        $this->checkBounds($offset, 4);
         return unpack('N', substr($this->data, $offset, 4))[1];
+    }
+
+    private function checkBounds(int $offset, int $length): void
+    {
+        if ($offset < 0 || $length < 0 || $offset > strlen($this->data) - $length) {
+            throw new RuntimeException('Truncated or invalid font table.');
+        }
     }
 }

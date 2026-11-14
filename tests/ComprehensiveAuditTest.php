@@ -68,10 +68,7 @@ test('BengaliShaper reorders Devanagari pre-base vowel i', function () {
 
 test('FontManager resolves font stack with multiple families', function () {
     $fm = new FontManager();
-    $kalpurush = 'C:/Windows/Fonts/kalpurush.ttf';
-    if (!is_file($kalpurush)) {
-        skip('Kalpurush font not installed');
-    }
+    $kalpurush = testFont('bengali');
     $fm->addFont('Bangla', $kalpurush);
 
     // Font stack with custom font and fallback
@@ -79,7 +76,7 @@ test('FontManager resolves font stack with multiple families', function () {
     check($fontBangla instanceof TrueTypeFont, 'Must pick Bangla TrueType font for Bengali text');
 
     $fontEnglish = $fm->getFont("'Bangla', Helvetica, sans-serif", false, false, 'Hello World');
-    check($fontBangla->supportsText('Hello World'), 'Kalpurush also supports Latin characters');
+    check($fontEnglish->supportsText('Hello World'), 'The stack must resolve Latin text too');
 });
 
 test('ToUnicodeCMap handles astral plane codepoints with surrogate pairs', function () {
@@ -108,7 +105,10 @@ test('TableEngine orders tfoot at bottom even if declared before tbody', functio
     $table = $doc->getElementsByTagName('table')->item(0);
 
     $grid = TableEngine::buildGrid($table, [], fn($el, $parent) => [
-        'display' => 'block', 'width' => null, 'padding' => [0,0,0,0], 'border' => [],
+        'display' => 'block',
+        'width' => null,
+        'padding' => [0, 0, 0, 0],
+        'border' => [],
     ]);
 
     same(2, count($grid['rows']), 'Must have 2 rows');
@@ -306,4 +306,178 @@ test('HtmlPdf supports setHeaderHtml and setFooterHtml with dynamic page tokens'
     check(str_contains($decomp, 'Confidential'), 'Footer HTML text must be rendered');
     check(str_contains($decomp, 'Page 1 / 2'), 'Footer page token {page} / {pages} must be rendered on page 1');
     check(str_contains($decomp, 'Page 2 / 2'), 'Footer page token {page} / {pages} must be rendered on page 2');
+});
+
+test('Core sans-serif resolves to Helvetica', function () {
+    $font = (new FontManager())->getFont('sans-serif');
+    same('Helvetica', $font->getName());
+});
+
+test('Output is repeatable and header/footer exclusions are independent', function () {
+    $pdf = (new HtmlPdf(footer: 'Page {page}/{pages}'))
+        ->setHeaderHtml('<p>HEADER</p>', true)
+        ->setFooterHtml('<p>FOOTER</p>')
+        ->addHtml('<p>First</p><p style="break-before:page">Second</p>');
+    $first = getDecompressedStreams($pdf->output());
+    $second = getDecompressedStreams($pdf->output());
+    same($first, $second, 'Repeated output must not accumulate page decorations');
+    same(1, substr_count($first, '(HEADER)'));
+    same(2, substr_count($first, '(FOOTER)'));
+    check(str_contains($first, '8 Tf'), 'Text footer must select a font with Tf');
+    check(!str_contains($first, '8 rg'), 'Text footer must not emit an invalid color operator');
+    $pdf->addHtml('<p>Third</p>');
+    $third = getDecompressedStreams($pdf->output());
+    check(str_contains($third, '(Page 1/3)'), 'Total page count must refresh after output');
+    check(!str_contains($third, '(Page 1/2)'), 'Old footer must not remain');
+});
+
+test('Page margins and print media use CSS units and cascade priority', function () {
+    $pdf = (new HtmlPdf())->addHtml('<style>
+        @page { margin:20mm 10mm 15mm; margin-left:25mm; }
+        @media screen { p { color:red !important; } }
+        @media print { p { color:#008000 !important; } }
+        </style><p style="margin:0;color:blue">Print</p>');
+    $stream = getDecompressedStreams($pdf->output());
+    check(str_contains($stream, '70.866 '), '25mm margin must be 70.866pt');
+    check(str_contains($stream, '0 0.502 0 rg'), 'Print important color must beat normal inline color');
+    check(!str_contains($stream, '1 0 0 rg'), 'Screen styles must not apply');
+});
+
+test('Custom properties inherit and rem uses the html font size', function () {
+    $pdf = (new HtmlPdf())->addHtml('<style>:root { --accent:#008000; font-size:20pt; }
+        p { color:var(--accent); padding:var(--pad, 2pt); font-size:1rem; }</style><p>Custom</p>');
+    $stream = getDecompressedStreams($pdf->output());
+    check(str_contains($stream, '20 Tf 0 0.502 0 rg'), 'Root font and custom color must inherit');
+});
+
+test('Inline boxes occupy one line and preserve following content', function () {
+    $pdf = (new HtmlPdf())->addHtml('<p style="margin:0">Before <span style="display:inline-block;padding:4pt 8pt;background:#ddd">Badge</span> After</p><p>Next</p>');
+    $stream = getDecompressedStreams($pdf->output());
+    preg_match_all('/([\d.]+) ([\d.]+) Td .*?\(\s*(Before|After|Next)[^)]*\) Tj/', $stream, $matches, PREG_SET_ORDER);
+    same(3, count($matches), 'Must preserve all text around the box');
+    same($matches[0][2], $matches[1][2], 'Before and after must share a baseline');
+    check((float) $matches[2][2] < (float) $matches[1][2], 'Following paragraph must be below');
+});
+
+test('Forward internal links resolve to the later page object', function () {
+    $pdf = (new HtmlPdf())->addHtml('<p><a href="#later">Jump</a></p><h1 id="later" style="break-before:page">Later</h1>')->output();
+    preg_match_all('/(\d+) 0 obj\s*<< \/Type \/Page\b/', $pdf, $pages);
+    same(2, count($pages[1]));
+    check(str_contains($pdf, '/Dest [' . $pages[1][1] . ' 0 R'), 'Forward destination must reference page two');
+});
+
+test('URI escaping preserves parentheses and backslashes', function () {
+    $pdf = (new HtmlPdf())->addHtml('<a href="https://example.com/(test)">Link</a>')->output();
+    check(str_contains($pdf, '/URI (https://example.com/\(test\))'), 'URI must escape each parenthesis once');
+});
+
+test('RGBA backgrounds and text retain alpha resources', function () {
+    $pdf = (new HtmlPdf())->addHtml('<div style="background:rgba(255,0,0,.25);border-radius:4pt;padding:4pt"><span style="color:rgba(0,0,0,.4)">Alpha</span></div>')->output();
+    check(str_contains($pdf, '/ca 0.250'), 'Background alpha must reach ExtGState');
+    check(str_contains($pdf, '/ca 0.400'), 'Text alpha must reach ExtGState');
+});
+
+test('Malformed fonts fail with a descriptive exception', function () {
+    $path = tempnam(sys_get_temp_dir(), 'tinypdf-font-');
+    try {
+        foreach (["\0\1\0\0", 'wOFF', 'ttcf', 'OTTO'] as $data) {
+            file_put_contents($path, $data);
+            throws(RuntimeException::class, fn() => new TrueTypeFont($path));
+        }
+    } finally {
+        unlink($path);
+    }
+});
+
+test('Bengali text keeps logical Unicode and spacing in embedded output', function () {
+    $text = 'বাংলা শিক্ষা';
+    $pdf = (new HtmlPdf())->addFont('Bangla', testFont('bengali'))
+        ->addHtml('<p style="font-family:Bangla;word-spacing:3pt">' . $text . '</p>')->output();
+    $stream = getDecompressedStreams($pdf);
+    $logical = strtoupper(bin2hex(mb_convert_encoding($text, 'UTF-16BE', 'UTF-8')));
+    check(str_contains($stream, '/ActualText <FEFF' . $logical . '>'), 'Copyable text must retain logical Unicode order');
+    check(str_contains($stream, '] TJ'), 'Composite-font word spacing must use text-array positioning');
+});
+
+test('Unicode class selectors and nth-child expressions apply', function () {
+    $pdf = (new HtmlPdf())->addHtml('<style>.বাংলা {color:#008000;} p {color:red;} p:nth-child(2n + 1) {font-weight:bold;}</style><p class="বাংলা">Styled</p>')->output();
+    check(str_contains(getDecompressedStreams($pdf), '0 0.502 0 rg'), 'Unicode CSS class must match');
+    check(str_contains($pdf, '/Helvetica-Bold'), 'Spaced nth-child expression must match');
+});
+
+test('Bengali wrapping keeps conjunct clusters intact', function () {
+    $text = 'ক্ষিক্ষিক্ষি';
+    $pdf = (new HtmlPdf())->addFont('Bangla', testFont('bengali'))
+        ->addHtml('<p style="font-family:Bangla;width:1pt;word-break:break-all">' . $text . '</p>')->output();
+    $stream = getDecompressedStreams($pdf);
+    preg_match_all('/\/ActualText <FEFF([0-9A-F]+)>/', $stream, $matches);
+    $parts = array_map(fn($hex) => mb_convert_encoding(hex2bin($hex), 'UTF-8', 'UTF-16BE'), $matches[1]);
+    same(['ক্ষি', 'ক্ষি', 'ক্ষি'], $parts, 'Never detach a matra or split a virama conjunct');
+});
+
+test('Arabic word order and combining marks survive basic bidi reordering', function () {
+    same('2026 ملاعلاب ابحرم', ArabicShaper::bidiReorder('مرحبا بالعالم 2026'));
+    same("بَتَكَ", ArabicShaper::bidiReorder("كَتَبَ"));
+});
+
+test('Rowspan uses the sum of unequal row heights', function () {
+    $pdf = (new HtmlPdf())->addHtml('<table style="width:200pt;border-collapse:collapse"><tr><td rowspan="2" style="background:#ff0000;padding:0">Span</td><td style="padding:0">One</td></tr><tr><td style="padding:0">Two<br>Three<br>Four</td></tr></table>')->output();
+    $stream = getDecompressedStreams($pdf);
+    preg_match('/1 0 0 rg [\d.]+ [\d.]+ [\d.]+ ([\d.]+) re f/', $stream, $match);
+    same(48.0, (float) ($match[1] ?? 0), 'Spanned background must cover 12pt + 36pt');
+});
+
+test('Flex rows measure wrapped content at the allocated width', function () {
+    $pdf = (new HtmlPdf())->addHtml('<div style="display:flex;width:200pt;gap:10pt"><div style="flex:1;padding:5pt">' . str_repeat('Wrapping content ', 8) . '</div><div style="flex:1;padding:5pt">Short</div></div><p>AfterFlex</p>')->output();
+    $stream = getDecompressedStreams($pdf);
+    preg_match_all('/[\d.]+ ([\d.]+) Td .*?\(([^)]*)\) Tj/', $stream, $matches, PREG_SET_ORDER);
+    $after = null;
+    $wrapping = [];
+    foreach ($matches as $match) {
+        if ($match[2] === 'AfterFlex')
+            $after = (float) $match[1];
+        if (str_contains($match[2], 'Wrapping') || str_contains($match[2], 'content'))
+            $wrapping[] = (float) $match[1];
+    }
+    check(count($wrapping) > 4, 'Content must wrap within its allocated card');
+    check($after !== null && $after < min($wrapping), 'Following content must appear below the tallest card');
+});
+
+test('CSS background data URIs preserve semicolons and paint above the color', function () {
+    $gif = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    if (!extension_loaded('gd'))
+        skip('GD unavailable');
+    $pdf = (new HtmlPdf())->addHtml('<div style="width:40pt;height:40pt;background-color:#ff0000;background-image:url(' . $gif . ');background-size:cover"></div>')->output();
+    $stream = getDecompressedStreams($pdf);
+    check(str_contains($stream, '/I1 Do'), 'Data URI must be loaded');
+    check(strpos($stream, '1 0 0 rg') < strpos($stream, '/I1 Do'), 'Color must be painted before the image');
+});
+
+test('Preformatted text does not wrap and invalid dimensions fail', function () {
+    $pdf = (new HtmlPdf())->addHtml('<pre style="width:20pt">ABCDEFGHIJABCDEFGHIJ</pre>')->output();
+    check(str_contains(getDecompressedStreams($pdf), '(ABCDEFGHIJABCDEFGHIJ)'), 'Pre text must stay on one line');
+    throws(InvalidArgumentException::class, fn() => new HtmlPdf([0, 100]));
+    throws(InvalidArgumentException::class, fn() => new HtmlPdf(fontSize: 0));
+    throws(InvalidArgumentException::class, fn() => (new HtmlPdf(margin: 200))->addHtml('<p>Too small</p>'));
+});
+
+test('Anonymous flex text, SVG items and decorated links remain visible', function () {
+    $pdf = (new HtmlPdf())->addHtml('<div style="display:flex;gap:10pt">Anonymous<svg width="20" height="20"><rect width="20" height="20" fill="red"/></svg><div>Child</div></div><p><a href="https://example.com" style="padding:4pt;background:#ddd;border-radius:4pt">Open</a></p>')->output();
+    $stream = getDecompressedStreams($pdf);
+    check(str_contains($stream, '(Anonymous)'), 'Flex text node must be rendered');
+    check(str_contains($stream, '1.000 0.000 0.000 rg'), 'Flex SVG must be rendered');
+    check(str_contains($pdf, '/URI (https://example.com)'), 'Decorated link must keep its annotation');
+});
+
+test('Missing font variants reuse the same embedded font', function () {
+    $pdf = (new HtmlPdf())->addFont('Bangla', testFont('bengali'))
+        ->addHtml('<p style="font-family:Bangla">বাংলা <b>বাংলা</b></p>')->output();
+    same(1, substr_count($pdf, '/Subtype /Type0'), 'Fallback to regular must not embed the same font twice');
+});
+
+test('Font shorthand and transparent text retain their style', function () {
+    $pdf = (new HtmlPdf())->addHtml('<p style="font:bold 14pt/1.5 sans-serif;color:transparent">Hidden</p>')->output();
+    check(str_contains($pdf, '/BaseFont /Helvetica-Bold'), 'Shorthand must select the bold sans-serif face');
+    check(str_contains(getDecompressedStreams($pdf), '14 Tf'), 'Shorthand must set the font size');
+    check(str_contains($pdf, '/ca 0.000'), 'Transparent text must have zero alpha');
 });

@@ -84,11 +84,13 @@ final class PdfWriter
 
         $pageKids = [];
         $pageIds = [];
+        foreach ($this->pages as $i => $page) {
+            $pageIds[$i] = ++$this->id;
+        }
 
         // Build Pages and Contents
         foreach ($this->pages as $i => $p) {
-            $pageId = ++$this->id;
-            $pageIds[$i] = $pageId;
+            $pageId = $pageIds[$i];
             $pageKids[] = "$pageId 0 R";
 
             // Annotations (Links)
@@ -106,7 +108,7 @@ final class PdfWriter
                         $destStr
                     );
                 } else {
-                    $uri = str_replace(['(', ')', '\\'], ['\\(', '\\)', '\\\\'], $link['url']);
+                    $uri = str_replace(['\\', '(', ')', "\r", "\n"], ['\\\\', '\\(', '\\)', '\\r', '\\n'], $link['url']);
                     $this->objects[$annotId] = sprintf(
                         '<< /Type /Annot /Subtype /Link /Rect [%s] /Border [0 0 0] /A << /Type /Action /S /URI /URI (%s) >> >>',
                         $rectStr,

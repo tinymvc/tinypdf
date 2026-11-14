@@ -15,7 +15,14 @@
     ],
     "license": "MIT",
     "require": {
-        "php": ">=8.2"
+        "php": ">=8.2",
+        "ext-dom": "*",
+        "ext-mbstring": "*",
+        "ext-zlib": "*",
+        "ext-ctype": "*"
+    },
+    "suggest": {
+        "ext-gd": "Required for PNG, GIF and WebP images"
     },
     "autoload": {
         "psr-4": {
