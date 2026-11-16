@@ -120,17 +120,31 @@ struct Font {
     }
 };
 
-static hb_blob_t *fontTable(hb_face_t *, hb_tag_t tag, void *data) {
-    FT_ULong length = 0;
-    auto ft = static_cast<FT_Face>(data);
-    if (FT_Load_Sfnt_Table(ft, tag, 0, nullptr, &length) || !length) return hb_blob_get_empty();
-    auto buffer = new char[length];
-    if (FT_Load_Sfnt_Table(ft, tag, 0, reinterpret_cast<FT_Byte *>(buffer), &length)) {
-        delete[] buffer;
-        return hb_blob_get_empty();
+static hb_face_t *loadFontFace(const std::string &path, unsigned index, FT_Face ft) {
+    std::unique_ptr<hb_blob_t, decltype(&hb_blob_destroy)> blob(
+        hb_blob_create_from_file_or_fail(path.c_str()), hb_blob_destroy);
+    require(bool(blob), "Cannot read font data");
+    auto face = hb_face_create(blob.get(), index);
+    if (hb_face_get_glyph_count(face)) return face;
+    hb_face_destroy(face);
+
+    // FreeType decodes WOFF/WOFF2. Materialize the decoded SFNT tables so
+    // shaping and subsetting share a complete, immutable HarfBuzz face.
+    face = hb_face_builder_create();
+    FT_ULong count = 0;
+    require(!FT_Sfnt_Table_Info(ft, 0, nullptr, &count), "Cannot enumerate font tables");
+    for (FT_UInt i = 0; i < count; ++i) {
+        FT_ULong tag = 0, length = 0;
+        require(!FT_Sfnt_Table_Info(ft, i, &tag, &length), "Cannot inspect font table");
+        std::vector<char> bytes(length);
+        require(!FT_Load_Sfnt_Table(ft, tag, 0, reinterpret_cast<FT_Byte *>(bytes.data()), &length),
+                "Cannot decode font table");
+        auto table = hb_blob_create(bytes.data(), length, HB_MEMORY_MODE_DUPLICATE, nullptr, nullptr);
+        bool added = hb_face_builder_add_table(face, tag, table);
+        hb_blob_destroy(table);
+        require(added, "Cannot construct decoded font face");
     }
-    return hb_blob_create(buffer, length, HB_MEMORY_MODE_READONLY, buffer,
-                          [](void *p) { delete[] static_cast<char *>(p); });
+    return face;
 }
 
 struct Span {
@@ -174,7 +188,7 @@ class Engine {
         require(index >= 0, "Invalid font face index");
         require(!FT_New_Face(library, path.c_str(), index, &font->ft), "Cannot load font: " + path);
         require(index < font->ft->num_faces && FT_IS_SFNT(font->ft), "Unsupported font face");
-        font->face = hb_face_create_for_tables(fontTable, font->ft, nullptr);
+        font->face = loadFontFace(path, index, font->ft);
         font->upem = hb_face_get_upem(font->face);
         require(hb_face_get_glyph_count(font->face) > 0, "Font has no glyphs");
         auto os2 = static_cast<TT_OS2 *>(FT_Get_Sfnt_Table(font->ft, ft_sfnt_os2));

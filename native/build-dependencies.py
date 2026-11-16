@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build the pinned text engines in native/prefix; system Cairo/RSVG stay dynamic."""
-import hashlib,json,os,pathlib,shutil,subprocess,tarfile,urllib.request
+import hashlib,json,os,pathlib,shutil,subprocess,tarfile,time,urllib.request
 ROOT=pathlib.Path(__file__).resolve().parent
 PREFIX=ROOT/'prefix'
 DOWNLOADS=ROOT/'downloads'
@@ -17,7 +17,13 @@ for name in ['freetype','icu','fribidi','harfbuzz']:
  archive=DOWNLOADS/entry['file']
  if not archive.exists():
   request=urllib.request.Request(entry['url'],headers={'User-Agent':'TinyPDF-1.1.0-build'})
-  with urllib.request.urlopen(request,timeout=120) as response:archive.write_bytes(response.read())
+  for attempt in range(3):
+   try:
+    with urllib.request.urlopen(request,timeout=120) as response:archive.write_bytes(response.read())
+    break
+   except (OSError, urllib.error.URLError):
+    if attempt == 2:raise
+    time.sleep(2 ** attempt)
  if hashlib.sha256(archive.read_bytes()).hexdigest()!=entry['sha256']:raise SystemExit('Source checksum mismatch: '+name)
  folder=SOURCES/name
  if not folder.exists():
