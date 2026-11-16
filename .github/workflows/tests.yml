@@ -1,28 +1,77 @@
-name: Tests
-on: [push, pull_request]
+name: PHP and native verification
+on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  verify:
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.2', '8.3', '8.4', '8.5']
+        include:
+          - { os: ubuntu-24.04, php: '8.2' }
+          - { os: ubuntu-24.04, php: '8.3' }
+          - { os: ubuntu-24.04, php: '8.4' }
+          - { os: ubuntu-24.04, php: '8.5' }
+          - { os: ubuntu-24.04-arm, php: '8.4' }
+          - { os: macos-15, php: '8.4' }
+          - { os: macos-15-intel, php: '8.4' }
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: dom, mbstring, zlib, ctype, gd
+          extensions: dom, mbstring, json, zlib, ctype, gd
           coverage: none
-      - name: Install test fonts
-        run: sudo apt-get update && sudo apt-get install -y fonts-noto-core fonts-wqy-microhei
-      - run: composer validate --strict
-      - run: composer install --no-interaction --prefer-dist
-      - name: Syntax check
-        run: find src tests examples -name '*.php' -print0 | xargs -0 -n1 php -l
-      - run: composer test
-        env:
-          TINYPDF_REQUIRE_FONTS: '1'
-      - run: php examples/invoice.php /tmp/invoice.pdf
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Linux graphics libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake pkg-config libcairo2-dev libfreetype-dev libpng-dev librsvg2-dev libbrotli-dev poppler-utils patchelf
+      - name: Install macOS graphics libraries
+        if: runner.os == 'macOS'
+        run: brew install cmake pkgconf cairo freetype libpng librsvg brotli poppler
+      - run: python -m pip install -r tests/requirements.txt meson==1.8.3 ninja==1.13.0
+      - uses: actions/cache@v4
+        with:
+          path: native/downloads
+          key: native-sources-${{ hashFiles('native/sources.lock.json') }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            tests/fonts
+            tests/unicode
+          key: unicode-fonts-${{ hashFiles('tests/fonts/manifest.json', 'tests/unicode/manifest.json') }}
+      - run: python native/build-dependencies.py
+      - name: Build and verify
+        shell: bash
+        run: |
+          export PKG_CONFIG_PATH="$PWD/native/prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          export PATH="$PWD/native/prefix/bin:$PATH"
+          export LD_LIBRARY_PATH="$PWD/native/prefix/lib:${LD_LIBRARY_PATH:-}"
+          cmake -S native -B native/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build native/build --target tinypdf-text tinypdf-test-helper --parallel
+          composer validate --strict
+          composer install --no-interaction --prefer-dist
+          php bin/install-fonts.php --tests --unicode
+          python tests/prepare_formats.py
+          php bin/tinypdf-check.php
+          composer test
+          python tests/reference.py
+          python tests/unicode_conformance.py
+          python tests/rendering.py
+          php tests/benchmark.php > tests/performance.json
+          python native/package.py
+          php bin/tinypdf-check.php "$(find dist -path '*/bin/tinypdf-text' -type f | head -1)"
+      - uses: actions/upload-artifact@v4
+        if: matrix.php == '8.4'
+        with:
+          name: candidate-${{ matrix.os }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+            tests/performance.json
+            tests/unicode/results.json
+            output/pdf/
+          if-no-files-found: error

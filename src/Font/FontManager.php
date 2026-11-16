@@ -4,243 +4,200 @@ declare(strict_types=1);
 
 namespace Spark\Pdf\Font;
 
-/**
- * Manages Core Adobe fonts, user-registered TrueType/OpenType fonts, and intelligent script routing.
- */
+use Spark\Pdf\Text\NativeHelper;
+use Spark\Pdf\Text\ShapedRun;
+use Spark\Pdf\TextOptions;
+
 final class FontManager
 {
-    /** @var array<string, FontInterface> key: "family_bold_italic" => FontInterface */
+    private NativeHelper $helper;
+    private array $registrations = [];
+    private array $fallbacks = [];
     private array $fonts = [];
-
-    /** @var array<string, string> key: "family_bold_italic" => PDF resource name (e.g. "F1") */
+    private array $instances = [];
     private array $resources = [];
+    private array $cache = [];
+    private int $cacheBytes = 0;
 
-    /** @var array<string, array<string, string>> family => [styleKey => fontPath] */
-    private array $customPaths = [];
-
-    /**
-     * Registers a custom TrueType/OpenType font family (e.g. for Bangla, Chinese, Japanese, Arabic, etc.).
-     *
-     * @param string $family Font family alias (e.g. 'Kalpurush', 'SimSun', 'Amiri', 'Roboto')
-     * @param string $path Absolute or relative path to the .ttf/.otf/.ttc file
-     * @param bool $bold Whether this file is the bold variant
-     * @param bool $italic Whether this file is the italic variant
-     */
-    public function addFont(string $family, string $path, bool $bold = false, bool $italic = false): self
+    public function __construct(TextOptions $options = new TextOptions())
     {
-        $family = strtolower(trim($family));
-        $styleKey = ($bold ? 'b' : '') . ($italic ? 'i' : '');
-        $this->customPaths[$family][$styleKey] = $path;
+        $this->helper = new NativeHelper($options);
+        $root = dirname(__DIR__, 2) . '/assets/fonts/';
+        $this->addFont('tinypdf sans', $root . 'TinyPDFSans.ttf');
+        $this->addFont('tinypdf sans', $root . 'TinyPDFSans-Italic.ttf', italic: true);
+    }
 
+    public function addFont(string $family, string $path, bool $bold = false, bool $italic = false, int $faceIndex = 0, array $variations = []): self
+    {
+        $family = strtolower(trim($family, " \t\n\r\0\x0B'\""));
+        if ($family === '' || !is_file($path) || !is_readable($path) || $faceIndex < 0) {
+            throw new \InvalidArgumentException("Invalid font registration: $family ($path).");
+        }
+        foreach ($variations as $axis => $value) {
+            if (!preg_match('/^[\x20-\x7E]{4}$/D', (string) $axis) || !is_numeric($value) || !is_finite((float) $value)) {
+                throw new \InvalidArgumentException('Font variations must map four-character axis tags to finite coordinates.');
+            }
+        }
+        $key = ($bold ? 'b' : '') . ($italic ? 'i' : '');
+        $this->registrations[$family][$key] = ['path' => realpath($path), 'faceIndex' => $faceIndex, 'variations' => $variations];
+        $this->cache = [];
+        $this->cacheBytes = 0;
         return $this;
     }
 
-    /**
-     * Resolves the appropriate font for given family, style, and text content.
-     * Supports font stacks (comma-separated), intelligent script fallback, and automatic system fonts.
-     * If text is Latin and no custom font is requested, returns standard Type 1 core font (0 KB overhead).
-     */
+    public function setFallbackFonts(array $families): self
+    {
+        foreach ($families as $family) {
+            if (!is_string($family) || trim($family) === '') throw new \InvalidArgumentException('Fallback families must be nonempty strings.');
+        }
+        $this->fallbacks = array_map(static fn($name) => strtolower(trim($name, " \t\n\r\0\x0B'\"")), $families);
+        $this->cache = [];
+        $this->cacheBytes = 0;
+        return $this;
+    }
+
+    public function helper(): NativeHelper { return $this->helper; }
+    public function byId(int $id): NativeFont { return $this->fonts[$id]; }
+
+    private function instance(array $registration, array $style): NativeFont
+    {
+        $baseKey = json_encode($registration, JSON_THROW_ON_ERROR);
+        if (!isset($this->instances[$baseKey])) {
+            $metadata = $this->helper->request('font', ['variations' => (object) $registration['variations']] + $registration);
+            $font = new NativeFont($this->helper, $metadata);
+            $this->fonts[$font->id()] = $font;
+            $this->instances[$baseKey] = $font;
+        }
+        $base = $this->instances[$baseKey];
+        $derived = ['wght' => $style['weight'] ?? (($style['bold'] ?? false) ? 700 : 400),
+            'wdth' => $style['stretch'] ?? 100, 'ital' => ($style['italic'] ?? false) ? 1 : 0,
+            'slnt' => ($style['italic'] ?? false) ? -12 : 0];
+        if (($style['opticalSizing'] ?? 'auto') === 'auto') $derived['opsz'] = $style['size'] ?? 10;
+        $variations = array_intersect_key(array_replace($derived, $registration['variations'], $style['variations'] ?? []), $base->metadata['axes']);
+        if ($variations === []) return $base;
+        ksort($variations);
+        $key = $baseKey . json_encode($variations, JSON_THROW_ON_ERROR);
+        if (!isset($this->instances[$key])) {
+            $metadata = $this->helper->request('font', ['variations' => (object) $variations] + $registration);
+            $font = new NativeFont($this->helper, $metadata);
+            $this->fonts[$font->id()] = $font;
+            $this->instances[$key] = $font;
+        }
+        return $this->instances[$key];
+    }
+
+    private function stack(array $style): array
+    {
+        $families = array_map(static fn($name) => strtolower(trim($name, " \t\n\r\0\x0B'\"")), explode(',', $style['family'] ?? 'tinypdf sans'));
+        $families = array_unique([...$families, ...$this->fallbacks, 'tinypdf sans']);
+        $ids = [];
+        $key = (!empty($style['bold']) ? 'b' : '') . (!empty($style['italic']) ? 'i' : '');
+        foreach ($families as $family) {
+            // Generic/core-family names have a deterministic bundled Unicode replacement.
+            if (!isset($this->registrations[$family]) && preg_match('/^(helvetica|arial|sans-serif|times|times new roman|georgia|garamond|palatino|serif|courier|mono|consolas|menlo|monospace)$/', $family)) {
+                $family = 'tinypdf sans';
+            }
+            if (!isset($this->registrations[$family])) continue;
+            $styles = $this->registrations[$family];
+            $registration = $styles[$key] ?? $styles[!empty($style['italic']) ? 'i' : ''] ?? $styles[''] ?? reset($styles);
+            $ids[] = $this->instance($registration, $style)->id();
+        }
+        return [array_values(array_unique($ids)), implode(', ', $families)];
+    }
+
     public function getFont(string $family, bool $bold = false, bool $italic = false, string $text = ''): FontInterface
     {
-        $candidates = array_values(array_filter(
-            array_map(static fn($f) => strtolower(trim($f, " \t\n\r\0\x0B'\"")), explode(',', $family)),
-            static fn($f) => $f !== ''
-        ));
-        if (empty($candidates)) {
-            $candidates = ['helvetica'];
+        [$ids] = $this->stack(['family' => $family, 'bold' => $bold, 'italic' => $italic]);
+        foreach ($ids as $id) {
+            if ($text === '' || $this->fonts[$id]->supportsText($text)) return $this->fonts[$id];
         }
-
-        $styleKey = ($bold ? 'b' : '') . ($italic ? 'i' : '');
-
-        // 1. Iterate over candidate font families in the CSS font stack
-        foreach ($candidates as $cand) {
-            if (isset($this->customPaths[$cand])) {
-                $styles = $this->customPaths[$cand];
-                $selected = $styleKey;
-                if (!isset($styles[$selected])) {
-                    $selected = isset($styles['']) ? '' : array_key_first($styles);
-                }
-                $font = $this->loadTrueType($cand, $styles[$selected], str_contains($selected, 'b'), str_contains($selected, 'i'));
-
-                // If text is empty or this font supports the glyphs, choose it
-                if ($text === '' || $font->supportsText($text)) {
-                    return $font;
-                }
-            } elseif ($this->isCoreFontFamily($cand)) {
-                $core = $this->loadCoreFont($cand, $bold, $italic);
-                if ($text === '' || $core->supportsText($text)) {
-                    return $core;
-                }
-            }
-        }
-
-        // Fallbacks must cover the text; a family name alone says nothing about coverage.
-        foreach ($this->customPaths as $name => $styles) {
-            $selected = $styleKey;
-            if (!isset($styles[$selected])) {
-                $selected = isset($styles['']) ? '' : array_key_first($styles);
-            }
-            $font = $this->loadTrueType($name, $styles[$selected], str_contains($selected, 'b'), str_contains($selected, 'i'));
-            if ($font->supportsText($text)) {
-                return $font;
-            }
-        }
-
-        $primaryFamily = $candidates[0] ?? 'helvetica';
-        $core = $this->loadCoreFont($primaryFamily, $bold, $italic);
-        if ($core->supportsText($text)) {
-            return $core;
-        }
-        foreach ($this->findSystemFonts($text) as $path) {
-            try {
-                $font = $this->loadTrueType('system', $path, false, false);
-            } catch (\RuntimeException) {
-                continue;
-            }
-            if ($font->supportsText($text)) {
-                return $font;
-            }
-        }
-
-        throw new \RuntimeException('No font covers the requested text. Register a matching font with addFont() or @font-face.');
+        throw new \RuntimeException('No single font covers this text; use the paragraph shaping pipeline for mixed fonts.');
     }
 
-    private function isCoreFontFamily(string $family): bool
+    public function layout(array $items, float $width, array $paragraph = []): array
     {
-        return (bool) preg_match('/^(helvetica|arial|sans-serif|times|times new roman|georgia|garamond|palatino|serif|courier|mono|consolas|menlo|monospace)$/i', $family);
-    }
-
-    private function findSystemFonts(string $text): array
-    {
-        $paths = [];
-
-        if (BengaliShaper::containsBengali($text)) {
-            $paths = [
-                // Windows
-                'C:/Windows/Fonts/kalpurush.ttf',
-                'C:/Windows/Fonts/vrinda.ttf',
-                // Linux
-                '/usr/share/fonts/truetype/lohit-bengali/Lohit-Bengali.ttf',
-                '/usr/share/fonts/truetype/noto/NotoSansBengali-Regular.ttf',
-                '/usr/share/fonts/google-noto/NotoSansBengali-Regular.ttf',
-                '/System/Library/Fonts/Supplemental/Bangla Sangam MN.ttc',
-            ];
-        } elseif (ArabicShaper::containsArabic($text)) {
-            $paths = [
-                // Windows
-                'C:/Windows/Fonts/arial.ttf',
-                'C:/Windows/Fonts/segoeui.ttf',
-                // Linux
-                '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-                '/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf',
-                // macOS
-                '/System/Library/Fonts/GeezaPro.ttc',
-            ];
-        } elseif (BengaliShaper::containsDevanagari($text)) {
-            $paths = [
-                // Windows
-                'C:/Windows/Fonts/mangal.ttf',
-                'C:/Windows/Fonts/nirmala.ttf',
-                // Linux
-                '/usr/share/fonts/truetype/lohit-devanagari/Lohit-Devanagari.ttf',
-                '/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf',
-                '/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc',
-            ];
-        } elseif (preg_match('/[\x{4E00}-\x{9FFF}\x{3040}-\x{30FF}\x{AC00}-\x{D7AF}]/u', $text)) {
-            $paths = [
-                // Windows
-                'C:/Windows/Fonts/msyh.ttc',
-                'C:/Windows/Fonts/simsun.ttc',
-                'C:/Windows/Fonts/YuGothR.ttc',
-                'C:/Windows/Fonts/malgun.ttf',
-                // Linux
-                '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
-                '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
-                '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
-                // macOS
-                '/System/Library/Fonts/PingFang.ttc',
-                '/Library/Fonts/Arial Unicode.ttf',
-            ];
+        $vertical = ($paragraph['writingMode'] ?? 'horizontal-tb') !== 'horizontal-tb';
+        $text = '';
+        $spans = [];
+        foreach ($items as $i => $item) {
+            $s = $item['s'];
+            $object = in_array($item['t'], ['img', 'svg', 'inline-box'], true);
+            $value = $object ? "\u{FFFC}" : ($item['t'] === 'br' ? "\n" : ($item['x'] ?? ''));
+            if ($value === '') continue;
+            if (!mb_check_encoding($value, 'UTF-8')) throw new \InvalidArgumentException('Text must be valid UTF-8.');
+            [$fonts, $families] = $this->stack($s);
+            $style = ['fonts' => $fonts, 'families' => $families, 'size' => $s['size'],
+                'language' => $s['lang'] ?? $this->helper->options->defaultLanguage,
+                'features' => $s['features'] ?? [], 'letterSpacing' => $s['letter-spacing'] ?? 0.0,
+                'wordSpacing' => $s['word-spacing'] ?? 0.0, 'wrap' => $s['wrap'] ?? true,
+                'preserve' => $s['pre'] ?? false, 'wordBreak' => $s['wordBreak'] ?? 'normal',
+                'overflowWrap' => $s['overflowWrap'] ?? 'normal', 'lineBreak' => $s['lineBreak'] ?? 'auto',
+                'orientation' => $s['textOrientation'] ?? 'mixed'];
+            if ($object) $style['object'] = $vertical ? $item['h'] : $item['w'];
+            $start = strlen($text);
+            $text .= $value;
+            $spans[] = ['start' => $start, 'end' => strlen($text), 'item' => $i, 'style' => $style];
         }
-
-        $paths = array_merge($paths, [
-            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-            '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
-            '/Library/Fonts/Arial Unicode.ttf',
-            'C:/Windows/Fonts/arial.ttf',
-        ]);
-        return array_values(array_filter($paths, 'is_file'));
+        if ($text === '') return [];
+        $arguments = ['text' => $text, 'spans' => $spans, 'width' => max(0.0, $width),
+            'language' => $paragraph['lang'] ?? $this->helper->options->defaultLanguage,
+            'direction' => ($paragraph['unicodeBidi'] ?? 'normal') === 'plaintext' ? 'auto' : ($paragraph['direction'] ?? 'ltr'),
+            'vertical' => $vertical];
+        $key = hash('sha256', json_encode($arguments, JSON_THROW_ON_ERROR));
+        if (!isset($this->cache[$key])) {
+            $result = $this->helper->request('layout', $arguments);
+            $bytes = strlen(serialize($result));
+            if ($this->cacheBytes + $bytes > 8388608 || count($this->cache) >= 256) {
+                $this->cache = [];
+                $this->cacheBytes = 0;
+            }
+            $this->cacheBytes += $bytes;
+            $this->cache[$key] = $result;
+        }
+        $lines = [];
+        foreach ($this->cache[$key]['lines'] as $line) {
+            $output = [];
+            foreach ($line['items'] as $run) {
+                $item = $items[$run['item']];
+                $item['advance'] = $run['width'];
+                if (!isset($run['object']) || !$vertical) $item['w'] = $run['width'];
+                if (!isset($run['object'])) {
+                    $item['t'] = 'w';
+                    $item['shaped'] = new ShapedRun($run);
+                }
+                $output[] = $item;
+            }
+            $logical = $line['text'];
+            foreach (array_reverse($spans) as $span) {
+                if (!isset($span['style']['object']) || $span['start'] < $line['start'] || $span['start'] >= $line['end']) continue;
+                $object = $items[$span['item']];
+                $replacement = $object['t'] === 'inline-box' ? $object['el']->textContent : '';
+                $logical = substr_replace($logical, $replacement, $span['start'] - $line['start'], 3);
+            }
+            $lines[] = ['items' => $output, 'w' => $line['width'], 'hard' => $line['hard'],
+                'text' => preg_replace('/[\x{202A}-\x{202E}\x{2066}-\x{2069}]/u', '', $logical),
+                'direction' => $line['direction']];
+        }
+        return $lines;
     }
 
     public function getResourceName(FontInterface $font): string
     {
-        $key = spl_object_hash($font);
-        if (!isset($this->resources[$key])) {
-            $name = 'F' . (count($this->resources) + 1);
-            $this->resources[$key] = $name;
-        }
-        return $this->resources[$key];
-    }
-
-    private function loadTrueType(string $family, string $path, bool $bold, bool $italic): FontInterface
-    {
-        $key = sprintf('ttf_%s_%d_%d', $path, (int) $bold, (int) $italic);
-        if (!isset($this->fonts[$key])) {
-            $this->fonts[$key] = new TrueTypeFont($path, $bold, $italic);
-        }
-        return $this->fonts[$key];
-    }
-
-    private function loadCoreFont(string $family, bool $bold, bool $italic): FontInterface
-    {
-        $baseFamily = match (true) {
-            (bool) preg_match('/courier|mono|consolas|menlo/', $family) => 'courier',
-            (bool) preg_match('/^(times|times new roman|georgia|garamond|palatino|serif)$/', $family) => 'times',
-            default => 'helvetica',
-        };
-
-        $baseName = match ($baseFamily) {
-            'times' => match (true) {
-                    $bold && $italic => 'Times-BoldItalic',
-                    $bold => 'Times-Bold',
-                    $italic => 'Times-Italic',
-                    default => 'Times-Roman',
-                },
-            'courier' => match (true) {
-                    $bold && $italic => 'Courier-BoldOblique',
-                    $bold => 'Courier-Bold',
-                    $italic => 'Courier-Oblique',
-                    default => 'Courier',
-                },
-            default => match (true) {
-                    $bold && $italic => 'Helvetica-BoldOblique',
-                    $bold => 'Helvetica-Bold',
-                    $italic => 'Helvetica-Oblique',
-                    default => 'Helvetica',
-                },
-        };
-
-        $key = 'core_' . $baseName;
-        if (!isset($this->fonts[$key])) {
-            $this->fonts[$key] = new CoreFont($baseName, $bold, $italic);
-        }
-        return $this->fonts[$key];
+        $key = spl_object_id($font);
+        return $this->resources[$key] ??= 'F' . (count($this->resources) + 1);
     }
 
     public function buildPdfResources(array &$objects, int &$nextId): string
     {
-        $resStr = '';
+        $resources = '';
         foreach ($this->fonts as $font) {
-            if (!isset($this->resources[spl_object_hash($font)]))
-                continue;
-            $resName = $this->getResourceName($font);
-            $fontObjs = $font->getPdfFontObjects($nextId, $resName);
-            $primaryId = array_key_last($fontObjs);
-            foreach ($fontObjs as $id => $body) {
-                $objects[$id] = $body;
-            }
-            $resStr .= "/$resName $primaryId 0 R ";
+            if (!isset($this->resources[spl_object_id($font)])) continue;
+            $name = $this->getResourceName($font);
+            $fontObjects = $font->getPdfFontObjects($nextId, $name);
+            $primary = array_key_last($fontObjects);
+            $objects += $fontObjects;
+            $resources .= "/$name $primary 0 R ";
         }
-        return $resStr;
+        return $resources;
     }
 }

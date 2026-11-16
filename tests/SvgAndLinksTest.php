@@ -22,7 +22,7 @@ HTML;
     $pdf->addHtml($html);
     $bytes = $pdf->output();
 
-    check(str_starts_with($bytes, '%PDF-1.4'), 'Must start with PDF header');
+    check(str_starts_with($bytes, '%PDF-1.7'), 'Must start with PDF header');
     check(str_contains($bytes, '/Subtype /Link'), 'Must contain clickable Link annotation');
     check(str_contains($bytes, '(https://example.com)'), 'Must contain target URI');
 });

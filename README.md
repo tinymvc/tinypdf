@@ -1,16 +1,28 @@
-# TinyPDF
+# TinyPDF 1.1.0
 
-A pure-PHP HTML-to-PDF library for invoices, reports, receipts, and other controlled document templates. Requires PHP 8.2+; no browser, subprocess, JavaScript runtime, or Composer runtime packages.
+A small PHP HTML-to-PDF library for invoices, cards, reports and controlled document templates. PHP handles layout and PDF assembly; one persistent native helper handles multilingual text. Output is PDF 1.7 with embedded static font subsets and logical Unicode text recovery.
 
-TinyPDF implements a **document-oriented subset of HTML and CSS**, not a browser engine. Review the compatibility limits below before choosing it for a template. Arbitrary websites, complete OpenType shaping, and browser-identical rendering are outside its current scope.
+TinyPDF implements a document-oriented subset of HTML/CSS. Browser-level layout, mathematical typesetting and PDF/UA certification remain outside its scope. Correct script rendering requires suitable registered fonts.
 
 ## Install
 
 ```bash
-composer require tinymvc/tinypdf
+composer require tinymvc/tinypdf:^1.1
 ```
 
-Required extensions: `dom`, `mbstring`, `zlib`, and `ctype`. Install `gd` for PNG, GIF, and WebP images. JPEG and inline SVG do not require GD. Composer checks the required extensions during installation.
+PHP 8.2+ requires `dom`, `mbstring`, `json`, `zlib`, `ctype`, and enabled `proc_open()`. Install `gd` for ordinary PNG/GIF/WebP images; color glyphs do not need GD.
+
+Install `tinypdf-text` and its native libraries before generating documents.
+
+Source build, with the native dependencies installed:
+
+```bash
+cmake -S native -B native/build -DCMAKE_BUILD_TYPE=Release
+cmake --build native/build --parallel
+php bin/tinypdf-check.php
+```
+
+See [native build and installation](native/README.md) for dependency versions, platform recipes and binary packaging. Set `TextOptions::helperPath` or `TINYPDF_TEXT_HELPER` to an installed helper. A source checkout also finds `native/build/tinypdf-text` automatically. Generation performs no downloads.
 
 ## Quick start
 
@@ -29,7 +41,7 @@ $pdf->save('invoice.pdf');
 // $pdf->download('invoice.pdf');
 ```
 
-Each `addHtml()` starts a new page. Repeated calls to `output()` rebuild page decorations without duplicating them. Pages may be added after output. Default Latin text uses the PDF core fonts without embedding a font file.
+Each `addHtml()` starts a new page. Repeated calls to `output()` rebuild page decorations without duplicating them. Pages may be added after output. Default Latin text uses the bundled OFL Noto Sans subset. Fonts are further subsetted to the used glyphs when output is assembled.
 
 The [invoice example](examples/invoice.php) demonstrates typography, CSS custom properties, padded cards, flex layout, pill badges, tables, and page numbering:
 
@@ -63,18 +75,41 @@ Local CSS font registration is also supported:
 </style>
 ```
 
-Set `basePath` to resolve relative image and font paths. Register separate bold/italic files when accurate variants matter. Missing variants reuse the available face; they do not synthesize new outlines. Automatic fallback searches a small set of common Windows, Linux, and macOS font paths. Explicit registration is more reproducible. If no font covers a text run, generation throws a `RuntimeException` instead of silently replacing its characters with question marks.
+Set `basePath` to resolve relative image and font paths. Register exact deployment fonts, including separate italic faces where needed. Generic/core family names resolve to the bundled Noto Sans; register explicit serif/monospace families if their metrics are required. Variable faces derive axes from CSS weight/stretch/style/optical sizing; explicit `font-variation-settings` takes precedence.
 
-Supported font containers have **TrueType outlines**: TTF, TrueType-flavored OTF, WOFF 1, and the first face of a TTC. CFF/CFF2 OpenType, WOFF2, variable-font axes, and color emoji are unsupported. Unsupported or malformed fonts fail explicitly. Fonts are embedded in full, not subsetted; large CJK fonts can significantly increase file size and memory use. Ensure your fonts permit embedding.
+Fallback is deterministic: the declared CSS font stack, followed by `setFallbackFonts()` in order, then the bundled Latin font. TinyPDF never searches host system-font directories. A grapheme/conjunct/emoji sequence remains together. Uncovered visible characters cause an exception listing Unicode values and attempted families.
 
-Language coverage:
+```php
+use Spark\Pdf\TextOptions;
 
-- Latin: core fonts cover Windows-1252; register a suitable font for additional characters.
-- Bengali and Devanagari: basic vowel reordering and selected GSUB ligatures. Wrapping preserves combining sequences and Bengali/Devanagari virama clusters. Normal line height uses the selected font's ascent, descent, and line gap.
-- Arabic: basic presentation-form joining and bidirectional runs, including digits and combining marks. Use an appropriate font and `dir="rtl"`. Mixed styled RTL runs, embeddings/isolates, and full Unicode bidi behavior are not implemented.
-- CJK: embedded-font glyphs and character-boundary wrapping. Full language-specific punctuation and line-breaking rules are not implemented.
+$pdf = new HtmlPdf(textOptions: new TextOptions(
+    helperPath: '/opt/tinypdf/bin/tinypdf-text',
+    defaultLanguage: 'und',
+    helperTimeout: 30.0,
+    colorGlyphDpi: 600,
+));
+$pdf->addFont('Bangla', '/opt/fonts/NotoSansBengali.ttf');
+$pdf->addFont('Arabic', '/opt/fonts/NotoNaskhArabic.ttf');
+$pdf->addFont('Japanese', '/opt/fonts/NotoSansJP.ttf');
+$pdf->setFallbackFonts(['Bangla', 'Arabic', 'Japanese']);
+$pdf->addHtml('<h1 lang="bn">বাংলা ভাষায় নির্ভুল নথি তৈরি</h1>');
+```
 
-**Complex-script limitation:** the engine does not implement full OpenType GSUB contextual processing or GPOS mark positioning. Some Bengali conjuncts, reph, vowel/mark combinations, Arabic harakat, and other Indic scripts will differ from a browser. Validate the actual text and font visually. Embedded text includes logical Unicode `ActualText` for readers that support it; extraction behavior varies by PDF reader. The OpenType [Bengali shaping specification](https://learn.microsoft.com/en-us/typography/script-development/bengali) describes the broader behavior that is not fully implemented here.
+Optional, checksummed OFL Noto font packs can be installed during deployment:
+
+```bash
+php bin/install-fonts.php notosansbengali notosansdevanagari notonaskharabic notosansjp
+```
+
+This writes `fonts/<pack>/` inside the package. Register the installed paths explicitly; downloading a pack does not change fallback selection. The pack manifest is versioned as 1.1.0 and includes source URLs, SHA-256 checksums and license files. Copy installed packs to an application-owned location when Composer deployments replace the package directory.
+
+TTF, OpenType CFF/CFF2, TTC face selection, WOFF/WOFF2 and variable instances are supported by the native font backend. TrueType subsets use explicit CID-to-GID maps. Cubic outlines are normalized to static CID-keyed CFF. Fonts with embedding/subsetting restrictions fail explicitly.
+
+HarfBuzz performs OpenType shaping; ICU supplies Unicode 17 properties, graphemes and locale-sensitive line breaks; FriBidi resolves paragraph and line bidi. The change from ICU bidi to FriBidi is intentional: Unicode conformance tests exposed ICU override/isolate failures. Original text stays in logical order; only positioned glyphs are reordered for painting.
+
+Supported typography includes inherited `lang`, `dir="ltr|rtl|auto"`, `bdi`, `bdo`, `unicode-bidi`, OpenType features, numeric weights, variation settings, Unicode wrapping, safe cluster spacing, `writing-mode:horizontal-tb|vertical-rl|vertical-lr`, and `text-orientation:mixed|upright|sideways`. Supply a height for a vertical text box to define its inline extent. PDF `ToUnicode` and `ActualText` preserve logical source sequences; reader extraction behavior still needs viewer-specific testing.
+
+COLR/CPAL, CBDT/CBLC, sbix and OpenType-SVG glyphs use transparent 600-DPI images by default, with invisible selectable companion text. Ordinary text stays vector. Rasterizing a bitmap font at 600 DPI does not invent detail beyond its original bitmap resolution.
 
 ## HTML and CSS compatibility
 
@@ -84,8 +119,8 @@ Language coverage:
 | Cascade | Embedded and inline CSS, class/id/tag selectors, Unicode class names, descendant/child selectors, `:root`, `:first-child`, `:last-child`, `:nth-child`, `!important` | No attribute/sibling selectors, pseudo-elements, selector functions, or CSS nesting |
 | Print CSS | `@page` size and margins; plain `@media print`, `all`, and `only print`; `<style media="print">` | No conditional media features, named pages, margin boxes, or `@supports` |
 | Theme values | Inherited custom properties, `var()` and fallback values | No registered custom properties or `calc()` |
-| Typography | Font family/size/weight/style, common `font` shorthand, alignment, underline/strike, transforms, spacing, `line-height` | No full typographic shaping or kerning; use explicit fonts for reliable results |
-| Wrapping | Normal flow, `pre`, `pre-wrap`, `nowrap`, long-word breaking, CJK breaks | Overlong normal words may be broken to fit; `pre-line`, hyphenation, and full Unicode line breaking are unsupported |
+| Typography | Font family/size/weight/style, common `font` shorthand, alignment, underline/strike, transforms, spacing, `line-height` | Native shaping, cluster fallback and variable axes; suitable registered fonts are required |
+| Wrapping | Unicode and dictionary line breaks, `pre`, `pre-wrap`, `pre-line`, `nowrap`, `word-break`, `overflow-wrap`, locale-specific `line-break` | Normal unbreakable words may overflow; automatic hyphenation is unsupported |
 | Boxes | Margins, padding, width/height, min/max width, min-height, border-box, solid/dashed/dotted borders, a uniform border radius | No floats, grid, shadows, gradients, clipping/scrolling overflow, or arbitrary transforms; max-height applies to images |
 | Flex | Single row/column, grow ratios, shrinking, alignment, justification, and gap; wrapping content measured at allocated widths | No flex-wrap, full flex-basis/min-content algorithm, or fragmentation of a flex item across pages; keep flex groups shorter than a page |
 | Inline boxes | Padded badges and inline-blocks with backgrounds, borders, and baseline alignment | Decorated spans are treated as indivisible boxes; decorations do not fragment across lines |
@@ -112,6 +147,7 @@ new HtmlPdf(
     ?string $basePath = null,
     bool $allowRemote = false,
     ?string $footer = null,
+    ?TextOptions $textOptions = null,
 );
 ```
 
@@ -120,7 +156,8 @@ Formats: `A3`, `A4`, `A5`, `A6`, `Letter`, `Legal`, `Card`, or custom `[width, h
 | Method | Purpose |
 |---|---|
 | `addHtml($html, $format = null, $orientation = null)` | Render a document or fragment on a new page |
-| `addFont($family, $path, $bold = false, $italic = false)` | Register a local font face |
+| `addFont($family, $path, $bold = false, $italic = false, $faceIndex = 0, $variations = [])` | Register a local font face |
+| `setFallbackFonts($families)` | Set the ordered registered fallback families |
 | `setTitle($title)`, `setAuthor($author)`, `setSubject($subject)` | Set Unicode PDF metadata |
 | `setBasePath($path)` | Resolve relative resource paths |
 | `setFooter($text)` | Add centered text with `{page}` and `{pages}` |
@@ -152,9 +189,10 @@ php tests/run.php BanglaText
 php examples/invoice.php invoice.pdf
 ```
 
-Tests search common host font paths. Set `TINYPDF_BENGALI_FONT` and `TINYPDF_CJK_FONT` to choose fonts explicitly. Set `TINYPDF_REQUIRE_FONTS=1` to fail instead of skipping font tests. The CI workflow checks PHP 8.2–8.5 with fonts installed; its results must pass before tagging a release.
+All language fixtures are pinned and required; tests do not silently skip absent fonts. Install them with `php bin/install-fonts.php --tests --unicode`. Python checks use `tests/requirements.txt`; run `tests/prepare_formats.py` before the PHP suite, then `tests/reference.py`, `tests/unicode_conformance.py` and `tests/rendering.py`. The latter requires Poppler on `PATH`.
 
-For visual validation, render the invoice and your own multilingual/multipage templates in a PDF reader or with Poppler. Automated tests verify rendering operators and document structure, but do not establish universal browser fidelity or certify complex-script shaping.
+
+For visual validation, render your own multilingual/multipage templates in the readers your users rely on. The tests compare shaping with direct HarfBuzz output and exercise Unicode conformance and PDF rendering; they do not establish universal browser fidelity or certify every font and reader combination.
 
 ## License
 

@@ -24,13 +24,11 @@ HTML;
     $pdf->setTitle('Invoice #101')->setAuthor('Acme Corp')->addHtml($html);
     $bytes = $pdf->output();
 
-    check(str_starts_with($bytes, '%PDF-1.4'), 'Must start with PDF header');
+    check(str_starts_with($bytes, '%PDF-1.7'), 'Must start with PDF header');
     check(str_contains($bytes, '/Title'), 'Must contain title');
     check(str_contains($bytes, '/Author'), 'Must contain author');
 
-    preg_match('/stream\r?\n(.*?)\r?\nendstream/s', $bytes, $m);
-    $decompressed = gzuncompress($m[1]);
-    check(str_contains($decompressed, 'Page 1 of 1'), 'Must contain footer text in decompressed content stream');
+    check(str_contains(logicalText(getDecompressedStreams($bytes)), 'Page 1 of 1'), 'Must contain logical footer text');
 });
 
 test('HtmlPdf generates ID card front and back', function () {
@@ -41,6 +39,6 @@ test('HtmlPdf generates ID card front and back', function () {
     $card->addHtml($front)->addHtml($back);
     $bytes = $card->output();
 
-    check(str_starts_with($bytes, '%PDF-1.4'), 'Must generate valid PDF');
+    check(str_starts_with($bytes, '%PDF-1.7'), 'Must generate valid PDF');
     check(str_contains($bytes, '/Count 2'), 'Must have 2 pages');
 });

@@ -10,7 +10,7 @@ use function sprintf;
 use function strlen;
 
 /**
- * Low-level PDF 1.4/1.7 document compiler.
+ * Low-level PDF 1.7 document compiler.
  * Assembles pages, resources (fonts, images, ExtGState), annotations (hyperlinks),
  * outlines (bookmarks), and xref tables into valid PDF binary output.
  */
@@ -155,7 +155,7 @@ final class PdfWriter
         $this->objects[2] = sprintf('<< /Type /Pages /Kids [%s] /Count %d >>', implode(' ', $pageKids), count($pageKids));
 
         // Info dictionary
-        $infoDict = '<< /Producer ' . self::pdfString('TinyPDF (HtmlPdf)') . ' /CreationDate (D:' . date('YmdHis') . ')';
+        $infoDict = '<< /Producer ' . self::pdfString('TinyPDF 1.1.0') . ' /CreationDate (D:' . date('YmdHis') . ')';
         foreach ($this->info as $k => $v) {
             $infoDict .= " /$k " . self::pdfString($v);
         }
@@ -164,7 +164,7 @@ final class PdfWriter
         $this->objects[$infoId] = $infoDict;
 
         // Assembly
-        $out = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n";
+        $out = "%PDF-1.7\n%\xE2\xE3\xCF\xD3\n";
         $offsets = [];
         ksort($this->objects);
 

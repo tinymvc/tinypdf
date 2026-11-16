@@ -16,7 +16,7 @@ HTML;
     $pdf->addHtml($html);
     $bytes = $pdf->output();
 
-    check(str_starts_with($bytes, '%PDF-1.4'), 'Must start with PDF header');
+    check(str_starts_with($bytes, '%PDF-1.7'), 'Must start with PDF header');
     check(strlen($bytes) > 500, 'Must produce PDF content');
 });
 
@@ -31,5 +31,5 @@ HTML;
     $pdf->addHtml($html);
     $bytes = $pdf->output();
 
-    check(str_starts_with($bytes, '%PDF-1.4'), 'Must produce valid PDF');
+    check(str_starts_with($bytes, '%PDF-1.7'), 'Must produce valid PDF');
 });

@@ -2,44 +2,17 @@
 
 declare(strict_types=1);
 
-use Spark\Pdf\Font\BengaliShaper;
 use Spark\Pdf\HtmlPdf;
-
-test('BengaliShaper detects Bengali characters', function () {
-    check(BengaliShaper::containsBengali('বাংলাদেশ'), 'Should detect Bengali text');
-    check(BengaliShaper::containsBengali('Hello বাংলা World'), 'Should detect mixed Bengali text');
-    check(!BengaliShaper::containsBengali('Hello World 123'), 'Should not detect English text');
-});
-
-test('BengaliShaper reorders pre-base vowel signs', function () {
-    // কি = ক (0995) + ি (09BF) -> visually ি + ক
-    $shaped = BengaliShaper::shape('কি');
-    same(BengaliShaper::SIGN_I, $shaped[0], 'Pre-base i-kar should be placed first');
-    same('ক', $shaped[1], 'Consonant follows pre-base i-kar');
-
-    // দে = দ (09A6) + ে (09C7) -> visually ে + দ
-    $shapedE = BengaliShaper::shape('দে');
-    same(BengaliShaper::SIGN_E, $shapedE[0], 'Pre-base e-kar should be placed first');
-    same('দ', $shapedE[1], 'Consonant follows pre-base e-kar');
-});
-
-test('BengaliShaper decomposes two-part vowels', function () {
-    // কো = ক + ো -> ে + ক + া
-    $shapedO = BengaliShaper::shape('কো');
-    same(BengaliShaper::SIGN_E, $shapedO[0], 'Pre-base part of o-kar is e-kar');
-    same('ক', $shapedO[1], 'Consonant in middle');
-    same(BengaliShaper::SIGN_AA, $shapedO[2], 'Post-base part of o-kar is aa-kar');
-});
 
 test('HtmlPdf renders Bengali HTML with custom registered font', function () {
     $pdf = new HtmlPdf('A4');
     $fontPath = testFont('bengali');
-    $pdf->addFont('Bangla', $fontPath);
+    $pdf->addFont('Bangla', $fontPath)->setFallbackFonts(['Bangla']);
     $html = '<h1 style="color:#0f766e">বাংলাদেশ আমার অহংকার</h1><p>যুক্তবর্ণ ও শিক্ষার আলো ছড়িয়ে দাও সর্বত্র।</p>';
     $pdf->addHtml($html);
     $bytes = $pdf->output();
 
-    check(str_starts_with($bytes, '%PDF-1.4'), 'Must start with PDF header');
+    check(str_starts_with($bytes, '%PDF-1.7'), 'Must start with PDF header');
     check(str_contains($bytes, '/Type0'), 'Must contain Type0 composite font for Bengali');
     check(str_contains($bytes, '/CIDFontType2'), 'Must contain CIDFontType2 descendant font');
     check(str_contains($bytes, '/ToUnicode'), 'Must contain ToUnicode CMap');
@@ -65,15 +38,15 @@ HTML;
     check(str_contains($bytes, '/Type0'), 'Must register and embed font from @font-face');
 });
 
-test('HtmlPdf keeps English-only documents small with zero custom font bloat', function () {
+test('HtmlPdf subsets the bundled Latin font', function () {
     $pdf = new HtmlPdf('A4');
     $html = '<h1>Invoice #101</h1><p>Customer: John Doe, New York, USA. Amount: $100.00</p>';
     $pdf->addHtml($html);
     $bytes = $pdf->output();
 
-    check(!str_contains($bytes, '/Type0'), 'English document must not embed Type0 font');
-    check(!str_contains($bytes, '/FontFile2'), 'English document must not embed FontFile2');
-    check(strlen($bytes) < 3000, 'English document must stay tiny (< 3KB)');
+    check(str_contains($bytes, '/Type0'), 'Latin text must use the shared Unicode pipeline');
+    check(str_contains($bytes, '/FontFile2'), 'Must embed the selected outlines');
+    check(strlen($bytes) < 18000, 'Latin subsets must remain compact');
 });
 
 test('HtmlPdf supports Chinese custom font and line wrapping', function () {

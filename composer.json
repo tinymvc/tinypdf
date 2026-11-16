@@ -1,6 +1,6 @@
 {
     "name": "tinymvc/tinypdf",
-    "description": "Fast, dependency-free Modern HTML to PDF generator for PHP 8.2+",
+    "description": "Minimal HTML to PDF for PHP 8.2+ with accurate native multilingual typography",
     "type": "library",
     "keywords": [
         "pdf",
@@ -10,8 +10,9 @@
         "indic",
         "flexbox",
         "svg",
-        "zero-dependency",
-        "pure-php"
+        "unicode",
+        "harfbuzz",
+        "multilingual"
     ],
     "license": "MIT",
     "require": {
@@ -19,7 +20,8 @@
         "ext-dom": "*",
         "ext-mbstring": "*",
         "ext-zlib": "*",
-        "ext-ctype": "*"
+        "ext-ctype": "*",
+        "ext-json": "*"
     },
     "suggest": {
         "ext-gd": "Required for PNG, GIF and WebP images"
@@ -42,5 +44,15 @@
             "name": "Shahin Moyshan",
             "email": "shahin.moyshan2@gmail.com"
         }
-    ]
+    ],
+    "bin": [
+        "bin/tinypdf-check.php",
+        "bin/install-fonts.php"
+    ],
+    "extra": {
+        "tinypdf": {
+            "version": "1.1.0",
+            "text-protocol": 1
+        }
+    }
 }

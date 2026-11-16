@@ -1,0 +1,59 @@
+name: Windows native candidate
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: dom, mbstring, json, zlib, ctype, gd
+          coverage: none
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          path-type: inherit
+          install: >-
+            make tar autoconf automake libtool
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-pip
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-cairo
+            mingw-w64-ucrt-x86_64-freetype
+            mingw-w64-ucrt-x86_64-libpng
+            mingw-w64-ucrt-x86_64-librsvg
+            mingw-w64-ucrt-x86_64-brotli
+      - name: Build pinned native engines and run integration
+        shell: msys2 {0}
+        run: |
+          python native/build-dependencies.py
+          export PKG_CONFIG_PATH="$PWD/native/prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          export PATH="$PWD/native/prefix/bin:$PATH"
+          cmake -S native -B native/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build native/build --target tinypdf-text tinypdf-test-helper --parallel
+          composer install --no-interaction --prefer-dist
+          php bin/install-fonts.php --tests --unicode
+          python -m pip install --break-system-packages 'fonttools[woff]==4.61.1'
+          python tests/prepare_formats.py
+          php bin/tinypdf-check.php
+          composer test
+          python tests/reference.py
+          python tests/unicode_conformance.py
+          python native/package.py
+          php bin/tinypdf-check.php "$(find dist -path '*/bin/tinypdf-text.exe' -type f | head -1)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-windows-x64
+          path: |
+            dist/*.zip
+            dist/*.sha256
+            tests/unicode/results.json
+          if-no-files-found: error
