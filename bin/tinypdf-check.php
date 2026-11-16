@@ -3,9 +3,21 @@
 
 declare(strict_types=1);
 
-require $_composer_autoload_path ?? dirname(__DIR__) . '/vendor/autoload.php';
-
 try {
+    $autoload = $_composer_autoload_path ?? null;
+    if ($autoload === null) {
+        foreach ([dirname(__DIR__) . '/vendor/autoload.php', dirname(__DIR__, 3) . '/autoload.php'] as $candidate) {
+            if (is_file($candidate)) {
+                $autoload = $candidate;
+                break;
+            }
+        }
+    }
+    if ($autoload === null || !is_file($autoload)) {
+        throw new RuntimeException('Composer autoloader not found. Run composer install, then php vendor/bin/tinypdf-check.php from your project root.');
+    }
+    require $autoload;
+
     $options = new Spark\Pdf\TextOptions(helperPath: $argv[1] ?? null);
     $manager = new Spark\Pdf\Font\FontManager($options);
     $capabilities = $manager->helper()->capabilities();

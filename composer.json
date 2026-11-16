@@ -46,6 +46,7 @@
         }
     ],
     "bin": [
+        "bin/tinypdf-install.php",
         "bin/tinypdf-check.php",
         "bin/install-fonts.php"
     ],

@@ -26,15 +26,14 @@ TinyPDF implements a document-oriented subset of HTML/CSS. Browser-level layout,
 
 ```bash
 composer require tinymvc/tinypdf
+php vendor/bin/tinypdf-install.php
 ```
 
-Install `tinypdf-text` and its native libraries before generating documents. To build from source (with the native dependencies installed):
+Run both commands from your application's project root. The installer builds `tinypdf-text` inside the package and verifies it with a generated PDF. No directory changes or helper-path configuration are needed. Rerun it after updating TinyPDF or installing the project on another machine.
 
-```bash
-cmake -S native -B native/build -DCMAKE_BUILD_TYPE=Release
-cmake --build native/build --parallel
-php bin/tinypdf-check.php
-```
+Install CMake, a C++ compiler, pkg-config and the native development libraries first. The installer uses those dependencies; it does not download them or modify system packages. On Windows, run it in an MSYS2 UCRT64 shell with Ninja installed.
+
+To check an existing installation, run `php vendor/bin/tinypdf-check.php` from the project root.
 
 See [native build and installation](native/README.md) for dependency versions, platform recipes and binary packaging.
 

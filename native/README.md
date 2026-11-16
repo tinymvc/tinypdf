@@ -6,7 +6,13 @@ The helper is required for every document. PHP launches it once using an argumen
 
 C++17, CMake 3.21+, pkg-config, HarfBuzz 14.2.1+ (including subset and Cairo), ICU 78.3+ with data, FriBidi 1.0.16+, FreeType with WOFF/WOFF2/Brotli support, Cairo 1.18+ with PNG, and librsvg 2.52+ are required. No PHP FFI extension is used.
 
-If the appropriate development libraries are already installed:
+With the development libraries installed, build and verify from your application's project root:
+
+```sh
+php vendor/bin/tinypdf-install.php
+```
+
+In a source checkout, run `composer install` followed by `php bin/tinypdf-install.php`. The installer runs these commands for you:
 
 ```sh
 cmake -S native -B native/build -DCMAKE_BUILD_TYPE=Release
