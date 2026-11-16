@@ -17,3 +17,7 @@ dist/
 output/
 native/__pycache__/
 tests/performance.json
+bin/*.dll
+bin/*.exe
+bin/tinypdf-text
+/lib/

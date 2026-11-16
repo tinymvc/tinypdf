@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -23,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix='tinypdf-installed-') as directory:
             package.extractall(directory, filter='data')
     folder = next(pathlib.Path(directory).iterdir())
     manifest = json.loads((folder / 'manifest.json').read_text())
-    assert manifest['version'] == '1.1.0' and manifest['library_licenses']
+    assert manifest['version'] == '1.2.0' and manifest['library_licenses']
     for name, digest in manifest['files'].items():
         assert hashlib.sha256((folder / name).read_bytes()).hexdigest() == digest, name
     for library, notices in manifest['library_licenses'].items():
@@ -35,7 +36,8 @@ with tempfile.TemporaryDirectory(prefix='tinypdf-installed-') as directory:
     env['PATH'] = os.pathsep.join(part for part in env['PATH'].split(os.pathsep)
                                 if str(ROOT / 'native/prefix') not in part)
     env['TINYPDF_TEXT_HELPER'] = str(helper)
-    subprocess.run(['php', str(ROOT / 'bin/tinypdf-check.php'), str(helper)], env=env, cwd=ROOT, check=True)
-    subprocess.run(['php', str(ROOT / 'tests/run.php')], env=env, cwd=ROOT, check=True)
+    php_bin = shutil.which('php') or 'php'
+    subprocess.run([php_bin, str(ROOT / 'bin/tinypdf-check.php'), str(helper)], env=env, cwd=ROOT, check=True)
+    subprocess.run([php_bin, str(ROOT / 'tests/run.php')], env=env, cwd=ROOT, check=True)
     subprocess.run([sys.executable, str(ROOT / 'tests/rendering.py')], env=env, cwd=ROOT, check=True)
 print('Verified extracted runtime:', archive.name)

@@ -2,9 +2,11 @@
 """Bundle a tested helper with its non-system shared libraries and a checksum inventory."""
 import argparse,hashlib,json,os,pathlib,platform,re,shutil,subprocess,tarfile,urllib.request
 ROOT=pathlib.Path(__file__).resolve().parent
-parser=argparse.ArgumentParser();parser.add_argument('--binary',type=pathlib.Path,default=ROOT/'build'/('tinypdf-text.exe' if os.name=='nt' else 'tinypdf-text'));parser.add_argument('--output',type=pathlib.Path,default=ROOT.parent/'dist');args=parser.parse_args()
+cm_text = (ROOT/'CMakeLists.txt').read_text()
+default_ver = (re.search(r'project\(tinypdf_text\s+VERSION\s+([0-9.]+)', cm_text) or [None, '1.2.0'])[1]
+parser=argparse.ArgumentParser();parser.add_argument('--binary',type=pathlib.Path,default=ROOT/'build'/('tinypdf-text.exe' if os.name=='nt' else 'tinypdf-text'));parser.add_argument('--output',type=pathlib.Path,default=ROOT.parent/'dist');parser.add_argument('--version',default=default_ver);args=parser.parse_args()
 system=platform.system().lower();arch={'aarch64':'arm64','x86_64':'x64','amd64':'x64'}.get(platform.machine().lower(),platform.machine().lower())
-bundle_name=f'tinypdf-text-1.1.0-{system}-{arch}'
+bundle_name=f'tinypdf-text-{args.version}-{system}-{arch}'
 folder=args.output/bundle_name
 if folder.exists():raise SystemExit(f'Package already exists: {folder}')
 (folder/'bin').mkdir(parents=True);(folder/'lib').mkdir();(folder/'licenses').mkdir()
@@ -173,16 +175,24 @@ for filename,library in copied.items():
    if not found and root!=pathlib.Path('/'):found=copy_notices(pathlib.Path('/usr/share/doc')/name,name)
    notices+=found
  elif system=='windows':
-  unix_path=output(['cygpath','-u',library]).strip()
-  package=output(['pacman','-Qqo',unix_path]).strip()
-  for line in output(['pacman','-Ql',package]).splitlines():
-   installed=line.split(' ',1)[-1]
-   if '/share/licenses/' not in installed or installed.endswith('/'):continue
-   document=pathlib.Path(output(['cygpath','-w',installed]).strip())
-   if document.is_file():
-    relative=installed.split('/share/licenses/',1)[1]
-    target=folder/'licenses'/relative;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(document,target)
-    notices.append(str(target.relative_to(folder)))
+  cygpath=shutil.which('cygpath') or 'C:/msys64/usr/bin/cygpath.exe'
+  pacman=shutil.which('pacman') or 'C:/msys64/usr/bin/pacman.exe'
+  unix_path=output([cygpath,'-u',library]).strip()
+  package=output([pacman,'-Qqo',unix_path]).strip()
+  candidates=[package,package.rsplit('-',1)[0]]
+  for pkg in candidates:
+   if notices:break
+   try:
+    for line in output([pacman,'-Ql',pkg]).splitlines():
+     installed=line.split(' ',1)[-1]
+     p_lower=installed.lower()
+     if p_lower.endswith('/') or not ('/share/licenses/' in p_lower or '/license' in p_lower or '/copying' in p_lower or '/copyright' in p_lower):continue
+     document=pathlib.Path(output([cygpath,'-w',installed]).strip())
+     if document.is_file():
+      relative=installed.split('/share/licenses/',1)[1] if '/share/licenses/' in installed else pkg.split('mingw-w64-ucrt-x86_64-')[-1]+'/'+pathlib.Path(installed).name
+      target=folder/'licenses'/relative;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(document,target)
+      notices.append(str(target.relative_to(folder)))
+   except Exception:pass
  if not notices:raise SystemExit(f'Missing redistribution notices for {library}')
  license_inventory[filename]=sorted(set(notices))
 if system=='linux':
@@ -198,7 +208,7 @@ for dependency in ['harfbuzz','icu-uc','fribidi','freetype2','libbrotlidec','cai
  versions[dependency]=output(['pkg-config','--modversion',dependency]).strip()
 if system=='linux':versions['glibc']=platform.libc_ver()[1]
 files={str(p.relative_to(folder)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(folder.rglob('*')) if p.is_file()}
-(folder/'manifest.json').write_text(json.dumps(dict(version='1.1.0',platform=system,architecture=arch,dependencies=versions,library_licenses=license_inventory,notice_sources=source_inventory,files=files),indent=2)+'\n')
+(folder/'manifest.json').write_text(json.dumps(dict(version=args.version,platform=system,architecture=arch,dependencies=versions,library_licenses=license_inventory,notice_sources=source_inventory,files=files),indent=2)+'\n')
 archive=shutil.make_archive(str(args.output/bundle_name),'zip' if system=='windows' else 'gztar',root_dir=args.output,base_dir=bundle_name)
 path=pathlib.Path(archive);path.with_suffix(path.suffix+'.sha256').write_bytes((hashlib.sha256(path.read_bytes()).hexdigest()+'  '+path.name+'\n').encode('ascii'))
 print(path)

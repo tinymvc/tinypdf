@@ -28,7 +28,6 @@ use function in_array;
 use function is_array;
 use function is_float;
 use function is_string;
-use function ord;
 use function sprintf;
 use function strlen;
 
@@ -40,7 +39,7 @@ use function strlen;
  */
 final class HtmlPdf
 {
-    public const VERSION = '1.1.0';
+    public const VERSION = '1.2.0';
     private const PX = 0.75;          // 1 CSS px in points
     private const MM = 72 / 25.4;     // 1 mm in points
     private const SIDES = ['top', 'right', 'bottom', 'left'];
@@ -196,8 +195,18 @@ final class HtmlPdf
         'direction',
         'letter-spacing',
         'word-spacing',
-        'wordBreak', 'overflowWrap', 'lineBreak', 'lang', 'weight', 'stretch', 'opticalSizing',
-        'variations', 'features', 'writingMode', 'textOrientation', 'whiteSpace',
+        'wordBreak',
+        'overflowWrap',
+        'lineBreak',
+        'lang',
+        'weight',
+        'stretch',
+        'opticalSizing',
+        'variations',
+        'features',
+        'writingMode',
+        'textOrientation',
+        'whiteSpace',
     ];
 
     private const BORDER_NONE = ['w' => 0.0, 'c' => [0, 0, 0], 's' => 'none'];
@@ -242,10 +251,18 @@ final class HtmlPdf
         'letter-spacing' => 0.0,
         'word-spacing' => 0.0,
         'wordBreak' => 'normal',
-        'overflowWrap' => 'normal', 'lineBreak' => 'auto', 'lang' => 'und',
-        'weight' => 400, 'stretch' => 100, 'opticalSizing' => 'auto',
-        'variations' => [], 'features' => [], 'writingMode' => 'horizontal-tb',
-        'textOrientation' => 'mixed', 'unicodeBidi' => 'normal', 'whiteSpace' => 'normal',
+        'overflowWrap' => 'normal',
+        'lineBreak' => 'auto',
+        'lang' => 'und',
+        'weight' => 400,
+        'stretch' => 100,
+        'opticalSizing' => 'auto',
+        'variations' => [],
+        'features' => [],
+        'writingMode' => 'horizontal-tb',
+        'textOrientation' => 'mixed',
+        'unicodeBidi' => 'normal',
+        'whiteSpace' => 'normal',
     ];
 
     // ------------------------------------------------------------------ state
@@ -1079,9 +1096,14 @@ final class HtmlPdf
             $s['valign'] = $parent['valign'] ?? null;
         }
 
-        if ($el->hasAttribute('lang')) $s['lang'] = $el->getAttribute('lang') ?: $s['lang'];
-        if ($tag === 'bdi') { $s['unicodeBidi'] = 'isolate'; $s['direction'] = 'auto'; }
-        if ($tag === 'bdo') $s['unicodeBidi'] = 'bidi-override';
+        if ($el->hasAttribute('lang'))
+            $s['lang'] = $el->getAttribute('lang') ?: $s['lang'];
+        if ($tag === 'bdi') {
+            $s['unicodeBidi'] = 'isolate';
+            $s['direction'] = 'auto';
+        }
+        if ($tag === 'bdo')
+            $s['unicodeBidi'] = 'bidi-override';
         if ($el->hasAttribute('dir') && in_array($el->getAttribute('dir'), ['ltr', 'rtl', 'auto'], true)) {
             $s['unicodeBidi'] = $tag === 'bdo' ? 'bidi-override' : 'isolate';
         }
@@ -1486,23 +1508,29 @@ final class HtmlPdf
                     $s['word-spacing'] = (float) ($this->length($value, $fs) ?: 0.0);
                     break;
                 case 'word-break':
-                    if (in_array($l, ['break-all', 'keep-all', 'break-word', 'normal'], true)) $s['wordBreak'] = $l;
+                    if (in_array($l, ['break-all', 'keep-all', 'break-word', 'normal'], true))
+                        $s['wordBreak'] = $l;
                     break;
                 case 'overflow-wrap':
                 case 'word-wrap':
-                    if (in_array($l, ['anywhere', 'break-word', 'normal'], true)) $s['overflowWrap'] = $l;
+                    if (in_array($l, ['anywhere', 'break-word', 'normal'], true))
+                        $s['overflowWrap'] = $l;
                     break;
                 case 'line-break':
-                    if (in_array($l, ['auto', 'normal', 'loose', 'strict', 'anywhere'], true)) $s['lineBreak'] = $l;
+                    if (in_array($l, ['auto', 'normal', 'loose', 'strict', 'anywhere'], true))
+                        $s['lineBreak'] = $l;
                     break;
                 case 'unicode-bidi':
-                    if (in_array($l, ['normal', 'embed', 'isolate', 'bidi-override', 'isolate-override', 'plaintext'], true)) $s['unicodeBidi'] = $l;
+                    if (in_array($l, ['normal', 'embed', 'isolate', 'bidi-override', 'isolate-override', 'plaintext'], true))
+                        $s['unicodeBidi'] = $l;
                     break;
                 case 'writing-mode':
-                    if (in_array($l, ['horizontal-tb', 'vertical-rl', 'vertical-lr'], true)) $s['writingMode'] = $l;
+                    if (in_array($l, ['horizontal-tb', 'vertical-rl', 'vertical-lr'], true))
+                        $s['writingMode'] = $l;
                     break;
                 case 'text-orientation':
-                    if (in_array($l, ['mixed', 'upright', 'sideways'], true)) $s['textOrientation'] = $l;
+                    if (in_array($l, ['mixed', 'upright', 'sideways'], true))
+                        $s['textOrientation'] = $l;
                     break;
                 case 'font-stretch':
                     $s['stretch'] = str_ends_with($l, '%') ? max(50, min(200, (float) $l)) : match ($l) {
@@ -1516,7 +1544,8 @@ final class HtmlPdf
                 case 'font-variation-settings':
                     $s['variations'] = [];
                     if (preg_match_all('/[\'"]([A-Za-z0-9 ]{4})[\'"]\s+(-?\d+(?:\.\d+)?)/', $value, $axes, PREG_SET_ORDER)) {
-                        foreach ($axes as $axis) $s['variations'][$axis[1]] = (float) $axis[2];
+                        foreach ($axes as $axis)
+                            $s['variations'][$axis[1]] = (float) $axis[2];
                     }
                     break;
                 case 'font-feature-settings':
@@ -2489,7 +2518,8 @@ final class HtmlPdf
             'isolate-override' => "\u{2068}" . ($s['direction'] === 'rtl' ? "\u{202E}" : "\u{202D}"),
             default => '',
         };
-        if ($open !== '') $items[] = ['t' => 'w', 'x' => $open, 'w' => 0.0, 's' => $s, 'k' => ''];
+        if ($open !== '')
+            $items[] = ['t' => 'w', 'x' => $open, 'w' => 0.0, 's' => $s, 'k' => ''];
         foreach ($el->childNodes as $node) {
             if ($node instanceof DOMText) {
                 $this->collectText($node->nodeValue ?? '', $s, $items);
@@ -2519,7 +2549,8 @@ final class HtmlPdf
 
     private function collectText(string $text, array $s, array &$items): void
     {
-        if (!mb_check_encoding($text, 'UTF-8')) throw new InvalidArgumentException('Text must be valid UTF-8.');
+        if (!mb_check_encoding($text, 'UTF-8'))
+            throw new InvalidArgumentException('Text must be valid UTF-8.');
         $text = str_replace(["\r\n", "\r"], "\n", $text);
         if (!$s['pre']) {
             $pattern = $s['whiteSpace'] === 'pre-line' ? '/[ \t\f]+/' : '/[ \t\r\n\f]+/';
@@ -2531,9 +2562,16 @@ final class HtmlPdf
         } else {
             $text = str_replace("\t", '    ', $text);
         }
-        if ($text === '') return;
-        $items[] = ['t' => 'w', 'x' => $this->transform($text, $s), 'w' => 0.0, 's' => $s,
-            'k' => '', 'link' => $this->activeLinks ? end($this->activeLinks) : null];
+        if ($text === '')
+            return;
+        $items[] = [
+            't' => 'w',
+            'x' => $this->transform($text, $s),
+            'w' => 0.0,
+            's' => $s,
+            'k' => '',
+            'link' => $this->activeLinks ? end($this->activeLinks) : null
+        ];
     }
 
     private function transform(string $text, array $s): string
@@ -2548,8 +2586,14 @@ final class HtmlPdf
 
     private function textItem(string $text, array $s, string $type): array
     {
-        $item = ['t' => $type, 'x' => $text, 'w' => 0.0, 's' => $s, 'k' => '',
-            'link' => $this->activeLinks ? end($this->activeLinks) : null];
+        $item = [
+            't' => $type,
+            'x' => $text,
+            'w' => 0.0,
+            's' => $s,
+            'k' => '',
+            'link' => $this->activeLinks ? end($this->activeLinks) : null
+        ];
         $lines = $this->fontManager->layout([$item], 1e9, $s);
         $item['w'] = $lines[0]['w'] ?? 0.0;
         return $item;
@@ -2628,7 +2672,8 @@ final class HtmlPdf
         $free = max(0.0, $w - $line['w']);
         $spaces = 0;
         foreach ($line['items'] as $item) {
-            foreach ($item['shaped']->data['glyphs'] ?? [] as $glyph) $spaces += (int) $glyph['space'];
+            foreach ($item['shaped']->data['glyphs'] ?? [] as $glyph)
+                $spaces += (int) $glyph['space'];
         }
         $extra = ($justify && $align === 'justify' && $spaces > 0) ? $free / $spaces : 0.0;
         $cx = $x + match ($align) {
@@ -2645,7 +2690,8 @@ final class HtmlPdf
             if ($it['t'] === 'br')
                 continue;
             $spaceCount = 0;
-            foreach ($it['shaped']->data['glyphs'] ?? [] as $glyph) $spaceCount += (int) $glyph['space'];
+            foreach ($it['shaped']->data['glyphs'] ?? [] as $glyph)
+                $spaceCount += (int) $glyph['space'];
             $itemW = $it['w'] + $spaceCount * $extra;
 
             if ($it['t'] === 'img') {
@@ -2674,8 +2720,15 @@ final class HtmlPdf
                     [$this->y, $this->pending, $this->allowBreak] = $saved;
                 }
             } else {
-                $this->flushRun(['s' => $it['s'], 'text' => $it['x'] ?? '', 'shaped' => $it['shaped'],
-                    'x' => $cx, 'w' => $itemW, 'extra' => $extra, 'link' => $it['link'] ?? null], $base);
+                $this->flushRun([
+                    's' => $it['s'],
+                    'text' => $it['x'] ?? '',
+                    'shaped' => $it['shaped'],
+                    'x' => $cx,
+                    'w' => $itemW,
+                    'extra' => $extra,
+                    'link' => $it['link'] ?? null
+                ], $base);
             }
             $cx += $itemW;
         }
@@ -2683,8 +2736,15 @@ final class HtmlPdf
         $this->ops[] = "EMC Q\n";
         if (!$this->measuring) {
             $appearance = implode('', array_splice($this->ops, $start));
-            $this->ops[] = $this->logicalText->wrap($line['text'] ?? '', $appearance, $origin,
-                $this->pageH - $base, $cx - $origin, $ascent, $descent);
+            $this->ops[] = $this->logicalText->wrap(
+                $line['text'] ?? '',
+                $appearance,
+                $origin,
+                $this->pageH - $base,
+                $cx - $origin,
+                $ascent,
+                $descent
+            );
         }
         $this->y += $height;
     }
@@ -3106,8 +3166,15 @@ final class HtmlPdf
             }
         }
         $out .= "EMC Q\n";
-        return $this->measuring ? $out : $this->logicalText->wrap($text, $out, $origin,
-            $this->pageH - $baseline, $x - $origin, $s['size'], $s['size'] * .4);
+        return $this->measuring ? $out : $this->logicalText->wrap(
+            $text,
+            $out,
+            $origin,
+            $this->pageH - $baseline,
+            $x - $origin,
+            $s['size'],
+            $s['size'] * .4
+        );
     }
 
     private function shapedTextOp(ShapedRun $run, float $x, float $baseline, array $s, float $wordSpace = 0.0): string
@@ -3144,9 +3211,17 @@ final class HtmlPdf
             $cid = $font->cid($glyph['gid'], $unicode);
             $out .= ($color === null ? '0' : '3') . ' Tr ' . $matrix . ' ' . $this->n($gx) . ' ' . $this->n($gy) . " Tm $cid Tj\n";
             if ($color !== null) {
-                $images .= sprintf("q %s %s %s cm %s 0 0 %s %s %s cm /%s Do Q\n",
-                    $matrix, $this->n($gx), $this->n($gy), $this->n($color['drawW']), $this->n($color['drawH']),
-                    $this->n($color['left']), $this->n(-$color['top'] - $color['drawH']), $color['name']);
+                $images .= sprintf(
+                    "q %s %s %s cm %s 0 0 %s %s %s cm /%s Do Q\n",
+                    $matrix,
+                    $this->n($gx),
+                    $this->n($gy),
+                    $this->n($color['drawW']),
+                    $this->n($color['drawH']),
+                    $this->n($color['left']),
+                    $this->n(-$color['top'] - $color['drawH']),
+                    $color['name']
+                );
             }
             $cursor += $glyph['advance'] + ($glyph['space'] ? $wordSpace : 0.0);
             $crossCursor += $data['vertical'] ? $glyph['ax'] : $glyph['ay'];
@@ -3157,10 +3232,17 @@ final class HtmlPdf
     private function colorGlyphImage(int $font, int $glyph, array $s): ?array
     {
         $key = 'color:' . hash('sha256', json_encode([$font, $glyph, $s['size'], $s['color'], $this->textOptions->colorGlyphDpi], JSON_THROW_ON_ERROR));
-        if (array_key_exists($key, $this->imageCache)) return $this->imageCache[$key];
-        $result = $this->fontManager->helper()->request('color', ['font' => $font, 'gid' => $glyph,
-            'size' => $s['size'], 'dpi' => $this->textOptions->colorGlyphDpi, 'color' => array_slice($s['color'], 0, 3)]);
-        if ($result === null) return $this->imageCache[$key] = null;
+        if (array_key_exists($key, $this->imageCache))
+            return $this->imageCache[$key];
+        $result = $this->fontManager->helper()->request('color', [
+            'font' => $font,
+            'gid' => $glyph,
+            'size' => $s['size'],
+            'dpi' => $this->textOptions->colorGlyphDpi,
+            'color' => array_slice($s['color'], 0, 3)
+        ]);
+        if ($result === null)
+            return $this->imageCache[$key] = null;
         $width = $result['width'];
         $height = $result['height'];
         $rgb = base64_decode($result['rgb'], true);
@@ -3168,10 +3250,18 @@ final class HtmlPdf
         if ($rgb === false || $alpha === false || strlen($rgb) !== $width * $height * 3 || strlen($alpha) !== $width * $height) {
             throw new RuntimeException('Invalid color glyph raster.');
         }
-        $entry = ['name' => 'I' . (count($this->images) + 1), 'w' => $width, 'h' => $height,
-            'data' => gzcompress($rgb, 6), 'smask' => gzcompress($alpha, 6),
+        $entry = [
+            'name' => 'I' . (count($this->images) + 1),
+            'w' => $width,
+            'h' => $height,
+            'data' => gzcompress($rgb, 6),
+            'smask' => gzcompress($alpha, 6),
             'dict' => "/Type /XObject /Subtype /Image /Width $width /Height $height /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode",
-            'left' => $result['left'], 'top' => $result['top'], 'drawW' => $result['w'], 'drawH' => $result['h']];
+            'left' => $result['left'],
+            'top' => $result['top'],
+            'drawW' => $result['w'],
+            'drawH' => $result['h']
+        ];
         $this->images[$key] = $entry;
         return $this->imageCache[$key] = $entry;
     }
@@ -3186,20 +3276,30 @@ final class HtmlPdf
         $blockStart = count($this->ops);
         $blockText = '';
         $flushColumns = function () use (&$blockStart, &$blockText, &$used, &$extent, &$top, $x, $width, $s): void {
-            if ($this->measuring || $blockText === '') return;
+            if ($this->measuring || $blockText === '')
+                return;
             $appearance = implode('', array_splice($this->ops, $blockStart));
             $left = $s['writingMode'] === 'vertical-rl' ? $x + $width - $used : $x;
-            $this->ops[] = $this->logicalText->wrap($blockText, $appearance, $left,
-                $this->pageH - $top - $extent, $used, $extent, 0);
+            $this->ops[] = $this->logicalText->wrap(
+                $blockText,
+                $appearance,
+                $left,
+                $this->pageH - $top - $extent,
+                $used,
+                $extent,
+                0
+            );
         };
         foreach ($lines as $line) {
             $column = $s['size'] * ($s['lh'] ?? 1.4);
             foreach ($line['items'] as $item) {
                 $column = max($column, $item['s']['size'] * ($item['s']['lh'] ?? 1.4));
-                if (!isset($item['shaped'])) $column = max($column, $item['w']);
+                if (!isset($item['shaped']))
+                    $column = max($column, $item['w']);
             }
             if ($used > 0 && $used + $column > $width + .01) {
-                if (!$this->allowBreak) throw new RuntimeException('Vertical text exceeds the available block width.');
+                if (!$this->allowBreak)
+                    throw new RuntimeException('Vertical text exceeds the available block width.');
                 $flushColumns();
                 $this->newPage();
                 $blockStart = count($this->ops);
@@ -3210,7 +3310,7 @@ final class HtmlPdf
             }
             $cx = $s['writingMode'] === 'vertical-rl' ? $x + $width - $used - $column / 2 : $x + $used + $column / 2;
             $free = max(0.0, $inlineSize - $line['w']);
-            $cy = $top + match ($s['align']) { 'center' => $free / 2, 'right' => $free, default => 0.0 };
+            $cy = $top + match ($s['align']) { 'center' => $free / 2, 'right' => $free, default => 0.0};
             $blockText .= $line['text'] . $line['separator'];
             $this->ops[] = $this->actualTextStart($line['text']);
             foreach ($line['items'] as $item) {
@@ -3229,11 +3329,13 @@ final class HtmlPdf
                     $this->y = $cy;
                     $this->pending = 0.0;
                     $this->allowBreak = false;
-                    if ($item['link'] !== null) $this->activeLinks[] = $item['link'];
+                    if ($item['link'] !== null)
+                        $this->activeLinks[] = $item['link'];
                     try {
                         $this->renderBox($item['el'], $item['s'], $cx - $item['w'] / 2, $item['w']);
                     } finally {
-                        if ($item['link'] !== null) array_pop($this->activeLinks);
+                        if ($item['link'] !== null)
+                            array_pop($this->activeLinks);
                         [$this->y, $this->pending, $this->allowBreak] = $saved;
                     }
                 }

@@ -1,0 +1,172 @@
+name: Release Binaries
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, php: '8.4' }
+          - { os: ubuntu-24.04-arm, php: '8.4' }
+          - { os: macos-15, php: '8.4' }
+          - { os: macos-15-intel, php: '8.4' }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: dom, mbstring, json, zlib, ctype, gd
+          coverage: none
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake pkg-config libcairo2-dev libfreetype-dev libpng-dev librsvg2-dev libbrotli-dev poppler-utils patchelf
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: brew install cmake pkgconf cairo freetype libpng librsvg brotli poppler
+      - run: python -m pip install -r tests/requirements.txt meson==1.8.3 ninja==1.13.0
+      - uses: actions/cache@v4
+        with:
+          path: native/downloads
+          key: native-sources-${{ hashFiles('native/sources.lock.json') }}
+          restore-keys: native-sources-
+      - name: Identify native dependency cache
+        id: native-key
+        run: echo "key=$(python native/build-dependencies.py --cache-key)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        id: native-libraries
+        with:
+          path: native/prefix
+          key: native-libraries-${{ steps.native-key.outputs.key }}
+      - run: python native/build-dependencies.py
+        if: steps.native-libraries.outputs.cache-hit != 'true'
+      - uses: actions/cache/save@v4
+        if: steps.native-libraries.outputs.cache-hit != 'true'
+        with:
+          path: native/prefix
+          key: native-libraries-${{ steps.native-key.outputs.key }}
+      - name: Build and package
+        shell: bash
+        run: |
+          export PKG_CONFIG_PATH="$PWD/native/prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          export PATH="$PWD/native/prefix/bin:$PATH"
+          export LD_LIBRARY_PATH="$PWD/native/prefix/lib:${LD_LIBRARY_PATH:-}"
+          cmake -S native -B native/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build native/build --target tinypdf-text --parallel
+          python native/package.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.os }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+  build-windows:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: dom, mbstring, json, zlib, ctype, gd
+          coverage: none
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r tests/requirements.txt
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          path-type: inherit
+          install: >-
+            make tar autoconf automake libtool
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-cairo
+            mingw-w64-ucrt-x86_64-freetype
+            mingw-w64-ucrt-x86_64-libpng
+            mingw-w64-ucrt-x86_64-librsvg
+            mingw-w64-ucrt-x86_64-brotli
+            mingw-w64-ucrt-x86_64-poppler
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            native/downloads
+            tests/fonts
+            tests/unicode
+          key: windows-fixtures-${{ hashFiles('native/sources.lock.json', 'assets/font-packs.json', 'tests/unicode/manifest.json') }}
+          restore-keys: windows-fixtures-
+      - name: Identify native dependency cache
+        id: native-key
+        shell: msys2 {0}
+        run: echo "key=$(python native/build-dependencies.py --cache-key)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        id: native-libraries
+        with:
+          path: native/prefix
+          key: native-libraries-${{ steps.native-key.outputs.key }}
+      - name: Build pinned native libraries
+        if: steps.native-libraries.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: python native/build-dependencies.py
+      - uses: actions/cache/save@v4
+        if: steps.native-libraries.outputs.cache-hit != 'true'
+        with:
+          path: native/prefix
+          key: native-libraries-${{ steps.native-key.outputs.key }}
+      - name: Build and package native helper
+        shell: msys2 {0}
+        run: |
+          export PKG_CONFIG_PATH="$PWD/native/prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          export PATH="$PWD/native/prefix/bin:$PATH"
+          cmake -S native -B native/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build native/build --target tinypdf-text --parallel
+          python native/package.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-windows
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
+  publish:
+    needs: [build-unix, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+      - name: Display release files
+        run: ls -la release-artifacts
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            release-artifacts/*.zip
+            release-artifacts/*.tar.gz
+            release-artifacts/*.sha256
+          generate_release_notes: true

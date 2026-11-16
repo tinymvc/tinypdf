@@ -155,7 +155,7 @@ final class PdfWriter
         $this->objects[2] = sprintf('<< /Type /Pages /Kids [%s] /Count %d >>', implode(' ', $pageKids), count($pageKids));
 
         // Info dictionary
-        $infoDict = '<< /Producer ' . self::pdfString('TinyPDF 1.1.0') . ' /CreationDate (D:' . date('YmdHis') . ')';
+        $infoDict = '<< /Producer ' . self::pdfString('TinyPDF 1.2.0') . ' /CreationDate (D:' . date('YmdHis') . ')';
         foreach ($this->info as $k => $v) {
             $infoDict .= " /$k " . self::pdfString($v);
         }

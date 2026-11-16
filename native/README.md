@@ -1,4 +1,4 @@
-# TinyPDF native helper 1.1.0
+# TinyPDF native helper 1.2.0
 
 The helper is required for every document. PHP launches it once using an argument-array `proc_open()` call and retains fonts and instances until the document is destroyed. The helper never downloads fonts. Windows uses an authenticated loopback socket because PHP process pipes cannot enforce nonblocking reads; Linux/macOS use stdin/stdout.
 

@@ -37,6 +37,12 @@
         }
     },
     "scripts": {
+        "post-install-cmd": [
+            "@php bin/tinypdf-install.php"
+        ],
+        "post-update-cmd": [
+            "@php bin/tinypdf-install.php"
+        ],
         "test": "@php tests/run.php"
     },
     "authors": [
@@ -52,7 +58,7 @@
     ],
     "extra": {
         "tinypdf": {
-            "version": "1.1.0",
+            "version": "1.2.0",
             "text-protocol": 1
         }
     }
