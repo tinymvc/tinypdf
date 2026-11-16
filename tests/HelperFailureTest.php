@@ -25,7 +25,8 @@ foreach (['crash', 'timeout', 'oversize', 'truncated', 'protocol', 'id', 'capabi
 test('Authenticated socket transport exchanges large framed responses', function () {
     $helper = new NativeHelper();
     $start = new ReflectionMethod($helper, 'startSocket');
-    $start->invoke($helper, dirname(__DIR__) . '/native/build/tinypdf-text' . (PHP_OS_FAMILY === 'Windows' ? '.exe' : ''));
+    $path = getenv('TINYPDF_TEXT_HELPER') ?: dirname(__DIR__) . '/native/build/tinypdf-text' . (PHP_OS_FAMILY === 'Windows' ? '.exe' : '');
+    $start->invoke($helper, $path);
     $capabilities = $helper->request('capabilities');
     same(1, $capabilities['protocol']);
     $text = str_repeat('বাংলা 😀 ', 1000);
