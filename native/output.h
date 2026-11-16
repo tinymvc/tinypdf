@@ -168,21 +168,24 @@ Json Engine::colorGlyph(const Json &request) {
     double size = request.at("size"), dpi = request.value("dpi", 600.0);
     require(std::isfinite(size) && size > 0 && std::isfinite(dpi) && dpi >= 72 && dpi <= 2400, "Invalid color glyph size/DPI");
     double pixelsPerPoint = dpi / 72.0;
-    cairo_font_face_t *face = hb_cairo_font_face_create_for_font(font.font);
-    cairo_matrix_t matrix, ctm;
-    cairo_matrix_init_scale(&matrix, size * pixelsPerPoint, size * pixelsPerPoint);
-    cairo_matrix_init_identity(&ctm);
-    auto options = cairo_font_options_create();
-    cairo_font_options_set_hint_style(options, CAIRO_HINT_STYLE_NONE);
-    cairo_font_options_set_hint_metrics(options, CAIRO_HINT_METRICS_OFF);
-    std::unique_ptr<cairo_scaled_font_t, decltype(&cairo_scaled_font_destroy)> scaledOwner(
-        cairo_scaled_font_create(face, &matrix, &ctm, options), cairo_scaled_font_destroy);
-    auto scaled = scaledOwner.get();
-    cairo_font_options_destroy(options);
-    cairo_font_face_destroy(face);
+    std::unique_ptr<cairo_scaled_font_t, decltype(&cairo_scaled_font_destroy)> scaledOwner(nullptr, cairo_scaled_font_destroy);
     cairo_glyph_t glyph{gid, 0, 0};
     cairo_text_extents_t extents{};
-    cairo_scaled_font_glyph_extents(scaled, &glyph, 1, &extents);
+    // SVG and bitmap glyphs use their own geometry and decoder. Asking Cairo's
+    // user font to measure them first can invoke an unsupported paint callback.
+    if (!hb_blob_get_length(svg) && !hb_blob_get_length(png)) {
+        auto face = hb_cairo_font_face_create_for_font(font.font);
+        cairo_matrix_t matrix, ctm;
+        cairo_matrix_init_scale(&matrix, size * pixelsPerPoint, size * pixelsPerPoint);
+        cairo_matrix_init_identity(&ctm);
+        auto options = cairo_font_options_create();
+        cairo_font_options_set_hint_style(options, CAIRO_HINT_STYLE_NONE);
+        cairo_font_options_set_hint_metrics(options, CAIRO_HINT_METRICS_OFF);
+        scaledOwner.reset(cairo_scaled_font_create(face, &matrix, &ctm, options));
+        cairo_font_options_destroy(options);
+        cairo_font_face_destroy(face);
+        cairo_scaled_font_glyph_extents(scaledOwner.get(), &glyph, 1, &extents);
+    }
     std::unique_ptr<RsvgHandle, decltype(&g_object_unref)> svgHandle(nullptr, g_object_unref);
     std::unique_ptr<cairo_surface_t, decltype(&cairo_surface_destroy)> bitmap(nullptr, cairo_surface_destroy);
     std::string svgId = "#glyph" + std::to_string(gid);
@@ -237,7 +240,7 @@ Json Engine::colorGlyph(const Json &request) {
     auto surface = surfaceOwner.get();
     std::unique_ptr<cairo_t, decltype(&cairo_destroy)> crOwner(cairo_create(surface), cairo_destroy);
     auto cr = crOwner.get();
-    cairo_set_scaled_font(cr, scaled);
+    if (scaledOwner) cairo_set_scaled_font(cr, scaledOwner.get());
     auto color = request.value("color", std::vector<double>{0, 0, 0});
     require(color.size() >= 3, "Invalid foreground color");
     cairo_set_source_rgb(cr, color[0], color[1], color[2]);

@@ -1,6 +1,6 @@
 # Native dependencies
 
-TinyPDF 1.1.0 uses dynamically linked libraries. The text engines are pinned by `sources.lock.json`; Cairo, FreeType, librsvg and transitive image/platform libraries are supplied by the build host. Every packaged library's checksum and the detected direct dependency versions are recorded in `manifest.json`. Rebuild against the same dependency packages to reproduce that environment.
+TinyPDF 1.1.0 uses dynamically linked libraries. The text engines are pinned by `sources.lock.json`; Cairo, librsvg and transitive image/platform libraries are supplied by the build host. Every packaged library's checksum and the detected direct dependency versions are recorded in `manifest.json`. Rebuild against the same dependency packages to reproduce that environment.
 
 | Component | License | Upstream source |
 |---|---|---|

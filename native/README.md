@@ -25,7 +25,7 @@ cmake -S native -B native/build -DCMAKE_BUILD_TYPE=Release
 cmake --build native/build --parallel
 ```
 
-Cairo, FreeType, librsvg and their platform dependencies must already be installed. On Ubuntu 24.04 install `build-essential cmake pkg-config libcairo2-dev libfreetype-dev libpng-dev librsvg2-dev libbrotli-dev patchelf`. On macOS use equivalent Homebrew/MacPorts development packages. On Windows use the MSYS2 UCRT64 toolchain and its CMake, pkgconf, Cairo, FreeType, libpng, librsvg and Brotli packages; build from a UCRT64 shell. The checked-in workflow describes the concrete jobs.
+Cairo, librsvg, libpng, Brotli and their platform dependencies must already be installed. On Ubuntu 24.04 install `build-essential cmake pkg-config libcairo2-dev libfreetype-dev libpng-dev librsvg2-dev libbrotli-dev patchelf`. On macOS use equivalent Homebrew/MacPorts development packages. On Windows use the MSYS2 UCRT64 toolchain and its CMake, pkgconf, Cairo, FreeType, libpng, librsvg and Brotli packages; build from a UCRT64 shell. The checked-in workflow describes the concrete jobs.
 
 `cmake --install native/build --prefix /desired/location` installs the executable. For a relocatable bundle, run `python3 native/package.py`, then run the diagnostic against the resulting `dist/.../bin/tinypdf-text`. Copy **both** `bin/` and `lib/` when installing a macOS/Linux bundle. Windows DLLs live alongside the executable.
 

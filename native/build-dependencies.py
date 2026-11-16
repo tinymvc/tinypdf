@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the pinned text engines in native/prefix; system Cairo/FreeType/RSVG stay dynamic."""
+"""Build the pinned text engines in native/prefix; system Cairo/RSVG stay dynamic."""
 import hashlib,json,os,pathlib,shutil,subprocess,tarfile,urllib.request
 ROOT=pathlib.Path(__file__).resolve().parent
 PREFIX=ROOT/'prefix'
@@ -12,7 +12,7 @@ env['PATH']=str(PREFIX/'bin')+os.pathsep+env.get('PATH','')
 env['PKG_CONFIG_PATH']=str(PREFIX/'lib/pkgconfig')+os.pathsep+str(PREFIX/'share/pkgconfig')+os.pathsep+env.get('PKG_CONFIG_PATH','')
 env['LD_LIBRARY_PATH']=str(PREFIX/'lib')+os.pathsep+env.get('LD_LIBRARY_PATH','')
 def run(args,cwd):subprocess.run([str(x) for x in args],cwd=cwd,env=env,check=True)
-for name in ['icu','fribidi','harfbuzz']:
+for name in ['freetype','icu','fribidi','harfbuzz']:
  entry=next(x for x in lock['sources'] if x['name']==name)
  archive=DOWNLOADS/entry['file']
  if not archive.exists():
@@ -34,10 +34,11 @@ for name in ['icu','fribidi','harfbuzz']:
   args=['meson','setup',str(build),str(source),'--prefix='+str(PREFIX),'--libdir=lib','--buildtype=release','-Ddefault_library=shared']
   if build.exists():args+=['--reconfigure']
   if name=='harfbuzz':args+=['-Dtests=disabled','-Ddocs=disabled','-Dutilities=enabled','-Dcairo=enabled','-Dfreetype=enabled','-Dpng=enabled','-Dzlib=enabled','-Dglib=enabled','-Dgobject=enabled','-Dicu=disabled','-Dgraphite2=disabled','-Dcoretext=auto','-Dgdi=auto','-Ddirectwrite=auto','-Draster=disabled','-Dvector=disabled','-Dgpu=disabled']
+  elif name=='freetype':args+=['-Dbrotli=enabled','-Dzlib=enabled','-Dpng=enabled','-Dharfbuzz=disabled','-Dbzip2=disabled','-Dtests=disabled']
   else:args+=['-Ddocs=false','-Dtests=false']
   run(args,ROOT);run(['meson','compile','-C',build],ROOT);run(['meson','install','-C',build],ROOT)
  licenses=PREFIX/'share/licenses'/name;licenses.mkdir(parents=True,exist_ok=True)
- for candidate in [source/'COPYING',source/'LICENSE',source.parent/'LICENSE']:
+ for candidate in [source/'COPYING',source/'LICENSE',source.parent/'LICENSE',source/'docs/FTL.TXT',source/'docs/GPLv2.TXT']:
   if candidate.is_file():shutil.copy2(candidate,licenses/candidate.name)
 print('Build environment:')
 print('PKG_CONFIG_PATH='+env['PKG_CONFIG_PATH'])
