@@ -200,5 +200,5 @@ if system=='linux':versions['glibc']=platform.libc_ver()[1]
 files={str(p.relative_to(folder)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(folder.rglob('*')) if p.is_file()}
 (folder/'manifest.json').write_text(json.dumps(dict(version='1.1.0',platform=system,architecture=arch,dependencies=versions,library_licenses=license_inventory,notice_sources=source_inventory,files=files),indent=2)+'\n')
 archive=shutil.make_archive(str(args.output/bundle_name),'zip' if system=='windows' else 'gztar',root_dir=args.output,base_dir=bundle_name)
-path=pathlib.Path(archive);path.with_suffix(path.suffix+'.sha256').write_text(hashlib.sha256(path.read_bytes()).hexdigest()+'  '+path.name+'\n')
+path=pathlib.Path(archive);path.with_suffix(path.suffix+'.sha256').write_bytes((hashlib.sha256(path.read_bytes()).hexdigest()+'  '+path.name+'\n').encode('ascii'))
 print(path)
