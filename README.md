@@ -107,7 +107,7 @@ TTF, OpenType CFF/CFF2, TTC face selection, WOFF/WOFF2 and variable instances ar
 
 HarfBuzz performs OpenType shaping; ICU supplies Unicode 17 properties, graphemes and locale-sensitive line breaks; FriBidi resolves paragraph and line bidi. Original text stays in logical order; only positioned glyphs are reordered for painting.
 
-Supported typography includes inherited `lang`, `dir="ltr|rtl|auto"`, `bdi`, `bdo`, `unicode-bidi`, OpenType features, numeric weights, variation settings, Unicode wrapping, safe cluster spacing, `writing-mode:horizontal-tb|vertical-rl|vertical-lr`, and `text-orientation:mixed|upright|sideways`. Supply a height for a vertical text box to define its inline extent. PDF `ToUnicode` and `ActualText` preserve logical source sequences; regression tests verify extraction in MuPDF, PDFium and Poppler.
+Supported typography includes inherited `lang`, `dir="ltr|rtl|auto"`, `bdi`, `bdo`, `unicode-bidi`, OpenType features, numeric weights, variation settings, Unicode wrapping, safe cluster spacing, `writing-mode:horizontal-tb|vertical-rl|vertical-lr`, and `text-orientation:mixed|upright|sideways`. Supply a height for a vertical text box to define its inline extent. PDF `ToUnicode` and `ActualText` preserve logical source sequences; regression tests verify extraction and search in MuPDF, PDFium, Poppler and Apple PDFKit.
 
 COLR/CPAL, CBDT/CBLC, sbix and OpenType-SVG glyphs use transparent 600-DPI images by default, with invisible selectable companion text. Ordinary text stays vector. Rasterizing a bitmap font at 600 DPI does not invent detail beyond its original bitmap resolution.
 

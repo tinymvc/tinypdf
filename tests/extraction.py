@@ -3,6 +3,8 @@
 import json
 import os
 import pathlib
+import platform
+import tempfile
 import re
 import shutil
 import subprocess
@@ -31,10 +33,21 @@ def verify(path):
     assert not result.stderr, result.stderr.decode(errors='replace')
     poppler_pages = result.stdout.decode().split('\f')[:-1]
     assert len(mupdf) == len(pdfium) == len(poppler_pages) == len(cases)
+    apple = None
+    if platform.system() == 'Darwin':
+        with tempfile.TemporaryDirectory() as directory:
+            executable = pathlib.Path(directory) / 'pdfkit'
+            subprocess.run(['swiftc', '-module-cache-path', directory + '/cache',
+                            str(ROOT / 'tests/pdfkit.swift'), '-o', str(executable)], check=True)
+            apple = json.loads(subprocess.check_output([str(executable), str(path)]))
+        assert all(width > 60 for width in apple['searches'].values()), apple['searches']
     for index, case in enumerate(cases):
         expected = canonical(case['text'])
         textpage = pdfium[index].get_textpage()
         texts = {'mupdf': mupdf[index].get_text(), 'pdfium': textpage.get_text_bounded(), 'poppler': poppler_pages[index]}
+        if apple:
+            texts['PDFKit'] = apple['pages'][index]
+            texts['PDFKit direct page'] = apple['individualPages'][index]
         for engine, text in texts.items():
             assert canonical(text, engine == 'poppler') == expected, (engine, index, case['text'], text)
         # Search must find the complete phrases, with a useful selection area.
@@ -48,7 +61,7 @@ def verify(path):
     assert not pymupdf.TOOLS.mupdf_warnings(), 'Invalid PDF/font data in extraction fixtures'
     mupdf.close()
     pdfium.close()
-    return {'cases': len(cases), 'readers': ['MuPDF', 'PDFium', 'Poppler'], 'failures': 0}
+    return {'cases': len(cases), 'readers': ['MuPDF', 'PDFium', 'Poppler'] + (['PDFKit'] if apple else []), 'failures': 0}
 
 
 if __name__ == '__main__':

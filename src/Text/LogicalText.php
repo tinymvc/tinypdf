@@ -11,6 +11,10 @@ final class LogicalText
 {
     private array $fonts = [];
 
+    public function __construct(private NativeHelper $helper)
+    {
+    }
+
     public function wrap(string $text, string $appearance, float $x, float $y, float $width,
         float $ascent, float $descent): string
     {
@@ -61,10 +65,6 @@ final class LogicalText
             $gx = $x + $offset;
             $gy = $y;
             $paint = '';
-            if ($offset === 0.0) {
-                $inverse = [1, 0, 0, 1, -$x, -$y];
-                $paint = 'q ' . self::numbers($inverse) . " cm\n" . $appearance . "Q\n";
-            }
             $this->fonts[$name] = compact('first', 'mapping', 'actualText', 'advance', 'ascent', 'descent', 'paint', 'width');
             $out .= 'BT /' . $name . ' 1 Tf 0 Tr 0 Tc 0 Tw ' . '1 0 0 1 '
                 . self::numbers([$gx, $gy]) . " Tm\n";
@@ -74,7 +74,72 @@ final class LogicalText
             $out .= "ET\n";
             $offset += count($characters) * $advance;
         }
-        return $out . "Q\n";
+        return $out . "Q\n" . $this->compatibilityText($text, $appearance, $x, $y, $width, $ascent, $descent, $rtl);
+    }
+
+    private function compatibilityText(string $text, string $appearance, float $x, float $y,
+        float $width, float $ascent, float $descent, bool $rtl): string
+    {
+        // PDFKit ignores replacement text on ink-free Type3 fonts. Supply real
+        // Unicode on the visible font, while other readers use the logical layer.
+        // A leading .notdef consumes PDFKit's first-object ActualText handling.
+        if ($rtl) {
+            $text = preg_replace_callback('/[\p{Arabic}\p{Hebrew}\p{M}]+/u',
+                static fn($match) => $match[0] . (preg_match('/\p{M}$/u', $match[0]) ? "\u{200F}" : ''), $text);
+            $text = preg_replace('/[ -~]*[!-~][ -~]*/u', "\u{200E}$0\u{200E}", $text);
+            $analysis = $this->helper->request('analyze', ['text' => $text, 'baseLevel' => 0]);
+            $characters = mb_str_split($text, 1, 'UTF-8');
+            $order = array_unique(array_map(static fn($index) => $analysis['utf16ToCharacter'][$index], $analysis['order']));
+            $characters = array_map(static fn($index) => $characters[$index], $order);
+        } else {
+            $characters = mb_str_split($text, 1, 'UTF-8');
+        }
+        $characters = ["\u{200E}", ...$characters, "\u{200E}"];
+        $advance = max(.001, $width / count($characters));
+        $out = '';
+        $offset = 0.0;
+        $chunks = [];
+        $mapping = [0 => '0020'];
+        $lookup = [];
+        $codes = [];
+        foreach ($characters as $character) {
+            if (count($mapping) === 256 && !isset($lookup[$character])) {
+                $chunks[] = [$mapping, $codes];
+                $mapping = [0 => '0020'];
+                $lookup = [];
+                $codes = [];
+            }
+            $code = $lookup[$character] ?? count($mapping);
+            if (!isset($mapping[$code])) {
+                $mapping[$code] = self::hex($character);
+                // Code 1 paints the line and must occur only once.
+                if ($code !== 1) $lookup[$character] = $code;
+            }
+            $codes[] = $code;
+        }
+        $chunks[] = [$mapping, $codes];
+        foreach ($chunks as $chunkIndex => [$mapping, $codes]) {
+            $name = 'L' . (count($this->fonts) + 1);
+            $first = 0;
+            $paint = 'q ' . self::numbers([1, 0, 0, 1, -$x - $offset, -$y]) . " cm\n";
+            if (count($chunks) > 1) {
+                // Partition the vector appearance between continuation fonts.
+                // Each font has real ink, and no visible region is painted twice.
+                $left = $chunkIndex === 0 ? -1000000 : $x + $offset;
+                $right = $chunkIndex === count($chunks) - 1 ? 1000000 : $x + $offset + count($codes) * $advance;
+                $paint .= self::numbers([$left, -1000000, $right - $left, 2000000]) . " re W n\n";
+            }
+            $paint .= $appearance . "Q\n";
+            $actualText = null;
+            $this->fonts[$name] = compact('first', 'mapping', 'actualText', 'advance', 'ascent', 'descent', 'paint', 'width')
+                + ['compatibility' => true];
+            $count = count($codes);
+            $codes = implode('', array_map(static fn($code) => sprintf('%02X', $code), $codes));
+            $out .= "q /Span << /ActualText ( ) >> BDC BT /$name 1 Tf 0 Tr 0 Tc 0 Tw 1 0 0 1 "
+                . self::numbers([$x + $offset, $y]) . " Tm <00> Tj\n<$codes> Tj ET EMC Q\n";
+            $offset += $count * $advance;
+        }
+        return $out;
     }
 
     public function buildResources(array &$objects, int &$id, string &$fonts, string $images, string $states): string
@@ -82,23 +147,32 @@ final class LogicalText
         if (!$this->fonts) return '';
         $resources = ++$id;
         $properties = '';
+        $programs = [];
         foreach ($this->fonts as $name => $font) {
             $procs = [];
             $encoding = [];
             $widths = [];
             foreach ($font['mapping'] as $code => $unicode) {
-                $metrics = self::numbers([$font['advance'], 0]);
-                if ($code === $font['first'] && $font['paint'] !== '') {
+                $dummy = ($font['compatibility'] ?? false) && $code === 0;
+                $advance = $dummy ? 0 : $font['advance'];
+                $metrics = self::numbers([$advance, 0]);
+                if ($code === 1 && $font['paint'] !== '') {
                     $stream = $metrics . " d0\n" . $font['paint'];
                 } else {
                     $stream = $metrics . ' ' . self::numbers([0, -$font['descent'], $font['advance'], $font['ascent']]) . " d1\n";
                 }
-                $objects[++$id] = self::stream($stream);
-                $procs[] = "/g$code $id 0 R";
-                $encoding[] = "/g$code";
-                $widths[] = $font['advance'];
+                $key = ($code === 1 && $font['paint'] !== '' ? $name : '') . hash('sha256', $stream);
+                if (!isset($programs[$key])) {
+                    $objects[++$id] = self::stream($stream);
+                    $programs[$key] = $id;
+                }
+                $program = $programs[$key];
+                $glyph = $dummy ? '.notdef' : "g$code";
+                $procs[] = "/$glyph $program 0 R";
+                $encoding[] = "/$glyph";
+                $widths[] = $advance;
             }
-            $objects[++$id] = self::stream(ToUnicodeCMap::build($font['mapping'], 1));
+            $objects[++$id] = self::stream(ToUnicodeCMap::build(array_filter($font['mapping'], static fn($value) => $value !== ''), 1));
             $cmap = $id;
             if ($font['actualText'] !== null) {
                 $objects[++$id] = '<< /ActualText <FEFF' . self::hex($font['actualText']) . '> >>';

@@ -23,7 +23,7 @@ def dependencies(path):
   if resolved and 'windows/system32' not in resolved.replace('\\','/').lower():found.append(resolved)
  return found
 baseline={'libc.so.6','libm.so.6','libpthread.so.0','libdl.so.2','librt.so.1','libresolv.so.2','libutil.so.1'}
-queue=[(args.binary.resolve(),helper)];copied={};edges=[]
+queue=[(args.binary.resolve(),helper)];copied={};edges=[];sources={}
 while queue:
  original,destination=queue.pop(0)
  for dependency in dependencies(original):
@@ -37,10 +37,16 @@ while queue:
   if path.name in baseline or path.name.startswith('ld-linux'):continue
   if path.resolve()==original.resolve():continue
   if not path.is_file():raise SystemExit(f'Unresolved dependency: {dependency}')
-  target=(folder/'bin' if system=='windows' else folder/'lib')/path.name
+  source=str(path.resolve())
+  filename=sources.get(source,path.name)
+  if filename in copied and copied[filename]!=source:
+   if system!='darwin':raise SystemExit(f'Conflicting runtime libraries: {filename}')
+   filename=hashlib.sha256(source.encode()).hexdigest()[:12]+'-'+path.name
+  target=(folder/'bin' if system=='windows' else folder/'lib')/filename
   edges.append((destination,reference,target))
-  if path.name not in copied:
-   copied[path.name]=str(path.resolve());shutil.copy2(path,target);target.chmod(0o755);queue.append((path.resolve(),target))
+  if source not in sources:
+   sources[source]=filename;copied[filename]=source
+   shutil.copy2(path,target);target.chmod(0o755);queue.append((path.resolve(),target))
 for destination,dependency,target in edges:
  if system=='darwin':subprocess.run(['install_name_tool','-change',dependency,'@loader_path/'+os.path.relpath(target,destination.parent),str(destination)],check=True)
 for binary in [helper,*[(folder/'bin' if system=='windows' else folder/'lib')/name for name in copied]]:
@@ -48,19 +54,55 @@ for binary in [helper,*[(folder/'bin' if system=='windows' else folder/'lib')/na
   if binary!=helper:subprocess.run(['install_name_tool','-id','@loader_path/'+binary.name,str(binary)],check=True)
   subprocess.run(['codesign','--force','--sign','-',str(binary)],check=True,stdout=subprocess.DEVNULL)
  elif system=='linux':subprocess.run(['patchelf','--set-rpath','$ORIGIN/../lib' if binary==helper else '$ORIGIN',str(binary)],check=True)
-# Preserve license documents supplied by the native dependency installation and OS package manager.
-for prefix in [ROOT/'prefix/share/licenses',pathlib.Path('/opt/local/share/doc'),pathlib.Path('/opt/homebrew/share/licenses'),pathlib.Path('/usr/share/licenses')]:
- if prefix.is_dir():
-  for path in prefix.rglob('*'):
-   if path.is_file() and path.name.lower() in {'copying','copying.lib','license','license.txt','license.html','ftl.txt','copyright'}:
-    if prefix==ROOT/'prefix/share/licenses' or any(x in str(path).lower() for x in ['cairo','freetype','harfbuzz','icu','fribidi','librsvg','libpng','pixman','glib','pcre','ffi','gettext','brotli','fontconfig','iconv','expat','zlib']):
-     target=folder/'licenses'/path.relative_to(prefix);target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(path,target)
-if system=='linux':
- for library in copied.values():
+# Preserve legal notices for every bundled library, including transitive ones.
+license_names={'copying','copying.lib','license','license.txt','license.html','ftl.txt','copyright'}
+license_inventory={}
+def copy_notices(directory, package):
+ notices=[]
+ if directory.is_dir():
+  for document in directory.rglob('*'):
+   if document.is_file() and (document.name.lower() in license_names or document.name.upper().startswith(('LICENSE','COPYING'))):
+    target=folder/'licenses'/package/document.relative_to(directory)
+    target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(document,target)
+    notices.append(str(target.relative_to(folder)))
+ return notices
+pinned_notices=copy_notices(ROOT/'prefix/share/licenses','pinned')
+for filename,library in copied.items():
+ path=pathlib.Path(library)
+ notices=[]
+ if path.is_relative_to(ROOT/'prefix'):
+  notices=pinned_notices
+ elif system=='darwin':
+  # Homebrew stores notices beside each installed Cellar version.
+  cellar=next((parent for parent in path.parents if parent.parent.parent.name=='Cellar'),None)
+  if cellar:
+   notices=copy_notices(cellar,cellar.parent.name)
+  elif str(path).startswith('/opt/local/'):
+   result=subprocess.run(['port','provides',library],text=True,capture_output=True)
+   match=re.search(r'provided by: (\S+)',result.stdout)
+   if match:notices=copy_notices(pathlib.Path('/opt/local/share/doc')/match[1],match[1])
+ elif system=='linux':
   result=subprocess.run(['dpkg-query','-S',library],text=True,capture_output=True)
   for line in result.stdout.splitlines():
-   package=line.split(': ')[0].split(':')[0];license=pathlib.Path('/usr/share/doc')/package/'copyright'
-   if license.is_file():shutil.copy2(license,folder/'licenses'/(package+'.copyright'))
+   package=line.split(': ')[0].split(':')[0]
+   notices+=copy_notices(pathlib.Path('/usr/share/doc')/package,package)
+ elif system=='windows':
+  unix_path=output(['cygpath','-u',library]).strip()
+  package=output(['pacman','-Qqo',unix_path]).strip()
+  for line in output(['pacman','-Ql',package]).splitlines():
+   installed=line.split(' ',1)[-1]
+   if '/share/licenses/' not in installed or installed.endswith('/'):continue
+   document=pathlib.Path(output(['cygpath','-w',installed]).strip())
+   if document.is_file():
+    relative=installed.split('/share/licenses/',1)[1]
+    target=folder/'licenses'/relative;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(document,target)
+    notices.append(str(target.relative_to(folder)))
+ if not notices:raise SystemExit(f'Missing redistribution notices for {library}')
+ license_inventory[filename]=sorted(set(notices))
+if system=='linux':
+ # Debian copyright notices reference these complete license texts.
+ common=pathlib.Path('/usr/share/common-licenses')
+ if common.is_dir():shutil.copytree(common,folder/'licenses/common-licenses',dirs_exist_ok=True)
 shutil.copy2(ROOT.parent/'LICENSE',folder/'licenses/TinyPDF-LICENSE')
 shutil.copy2(ROOT/'vendor/json.LICENSE',folder/'licenses/json.LICENSE')
 shutil.copy2(ROOT/'sources.lock.json',folder/'sources.lock.json')
@@ -69,7 +111,7 @@ versions={}
 for dependency in ['harfbuzz','icu-uc','fribidi','freetype2','cairo','librsvg-2.0','libpng']:
  versions[dependency]=output(['pkg-config','--modversion',dependency]).strip()
 files={str(p.relative_to(folder)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(folder.rglob('*')) if p.is_file()}
-(folder/'manifest.json').write_text(json.dumps(dict(version='1.1.0',platform=system,architecture=arch,dependencies=versions,files=files),indent=2)+'\n')
+(folder/'manifest.json').write_text(json.dumps(dict(version='1.1.0',platform=system,architecture=arch,dependencies=versions,library_licenses=license_inventory,files=files),indent=2)+'\n')
 archive=shutil.make_archive(str(args.output/name),'zip' if system=='windows' else 'gztar',root_dir=args.output,base_dir=name)
 path=pathlib.Path(archive);path.with_suffix(path.suffix+'.sha256').write_text(hashlib.sha256(path.read_bytes()).hexdigest()+'  '+path.name+'\n')
 print(path)

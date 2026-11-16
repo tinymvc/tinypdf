@@ -313,7 +313,7 @@ final class HtmlPdf
         $this->textOptions ??= new TextOptions();
         $this->fontManager = new FontManager($this->textOptions);
         $this->graphicState = new GraphicState();
-        $this->logicalText = new LogicalText();
+        $this->logicalText = new LogicalText($this->fontManager->helper());
     }
 
     // ------------------------------------------------------------- public API

@@ -16,6 +16,6 @@ TinyPDF 1.1.0 uses dynamically linked libraries. The text engines are pinned by 
 
 The JSON header's full license is in `vendor/json.LICENSE`. Font redistribution must retain its accompanying license. Font source URLs and SHA-256 hashes are in `assets/font-packs.json`.
 
-`package.py` copies dependency license files from native/prefix and supported package-manager locations. Before distributing an archive, audit its `licenses/` against **every** library in `manifest.json`, retain the corresponding source URLs/versions and satisfy each library's source/relinking requirements. The source-built engines remain replaceable shared libraries. ICU's data library is included by dependency traversal.
+`package.py` collects redistribution notices for every bundled shared library and records their paths in `manifest.json`. Packaging fails when a library has no notices. The source-built engines remain replaceable shared libraries; the lockfile retains their source URLs and checksums. ICU's data library is included by dependency traversal. Platform archives also retain package-manager copyright files and their referenced license texts.
 
-The source recipes and CI definition are not evidence that all target archives have been built, licensed, or tested. Only distribute artifacts after the target's verification job and license audit pass.
+The release checks extract each archive, verify its checksums, and run the PHP, rendering and text-extraction tests with build-library search paths removed.

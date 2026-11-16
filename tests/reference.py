@@ -79,11 +79,11 @@ def main():
    for line in output['lines']:
     for run in line['items']:
      actual.extend(dict(g=g['gid'],cl=g['cluster'],ax=g['ax'],ay=g['ay'],dx=g['dx'],dy=g['dy']) for g in run['glyphs'])
-   reference=json.loads(subprocess.check_output(['hb-shape',str(path),text,'--output-format=json','--no-glyph-names','--utf8-clusters','--cluster-level=0','--shapers=ot','--font-funcs=ot','--font-size=upem','--bot','--eot','--direction='+direction,'--script='+script,'--language='+language]))
+   reference=json.loads(subprocess.check_output(['hb-shape',str(path),'--output-format=json','--no-glyph-names','--utf8-clusters','--cluster-level=0','--shapers=ot','--font-funcs=ot','--font-size=upem','--bot','--eot','--direction='+direction,'--script='+script,'--language='+language], input=text.encode('utf-8')))
    reference=[{k:g[k] for k in ('g','cl','ax','ay','dx','dy')} for g in reference]
    if actual!=reference:
     failures.append((language,text,actual,reference))
-    print('FAIL',language,repr(text))
+    print('FAIL',language,ascii(text))
    else:print('PASS',language,direction)
  finally:helper.close()
  if failures:

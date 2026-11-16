@@ -31,12 +31,14 @@ foreach ([
 ] as [$text, $family]) {
     $cases[] = ['text' => trim($text), 'family' => $family];
 }
+$cases[] = ['text' => implode('', array_map(static fn($cp) => mb_chr($cp, 'UTF-8'), range(0x4e00, 0x4f67))), 'family' => 'notosansjp', 'size' => 1];
 $vertical = '日本語の縦書き。TinyPDF 1.1.0 正確な文字配置。こんにちは、世界。';
 foreach (['vertical-rl', 'vertical-lr'] as $mode) {
     $cases[] = ['text' => $vertical, 'family' => 'notosansjp', 'mode' => $mode];
 }
 foreach ($cases as $case) {
     $style = 'font-family:' . $case['family'];
+    if (isset($case['size'])) $style .= ';font-size:' . $case['size'] . 'pt';
     if (isset($case['mode'])) $style .= ';writing-mode:' . $case['mode'] . ';height:160pt;width:180pt;font-size:16pt';
     $html = '<div lang="' . ($case['language'] ?? 'und') . '" dir="' . ($case['direction'] ?? 'ltr')
         . '" style="' . $style . '">' . htmlspecialchars($case['text'], ENT_QUOTES, 'UTF-8') . '</div>';
