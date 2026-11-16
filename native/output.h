@@ -125,6 +125,13 @@ Json Engine::subset(const Json &request) {
     std::unique_ptr<hb_subset_input_t, decltype(&hb_subset_input_destroy)> input(hb_subset_input_create_or_fail(), hb_subset_input_destroy);
     require(bool(input), "Cannot allocate subset input");
     hb_subset_input_set_flags(input.get(), HB_SUBSET_FLAGS_NOTDEF_OUTLINE | HB_SUBSET_FLAGS_NO_HINTING);
+    // PDF embeds only static outlines. Color appearance is already represented
+    // by image XObjects, so bitmap/SVG/COLR tables must not enter the subset.
+    auto dropped = hb_subset_input_set(input.get(), HB_SUBSET_SETS_DROP_TABLE_TAG);
+    for (auto tag : {HB_TAG('C','O','L','R'), HB_TAG('C','P','A','L'), HB_TAG('C','B','D','T'),
+                    HB_TAG('C','B','L','C'), HB_TAG('s','b','i','x'), HB_TAG('S','V','G',' ')}) {
+        hb_set_add(dropped, tag);
+    }
     hb_set_clear(hb_subset_input_unicode_set(input.get()));
     auto set = hb_subset_input_glyph_set(input.get());
     hb_set_add(set, 0);
