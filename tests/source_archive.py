@@ -22,8 +22,8 @@ with tempfile.TemporaryDirectory(prefix='tinypdf-source-') as directory:
     package = pathlib.Path(directory) / 'installed'
     with zipfile.ZipFile(archive) as source:
         names = source.namelist()
-        assert not any(name.startswith(('native/build/', 'native/prefix/', 'native/downloads/', 'tests/', 'vendor/', 'dist/', 'output/')) for name in names)
-        for required in ['assets/font-packs.json', 'assets/fonts/OFL.txt', 'native/sources.lock.json', 'src/HtmlPdf.php', 'bin/tinypdf-install.php']:
+        assert not any(name.startswith(('native/', 'tests/', 'vendor/', 'dist/', 'output/')) for name in names)
+        for required in ['assets/font-packs.json', 'assets/fonts/OFL.txt', 'src/HtmlPdf.php', 'bin/tinypdf-install.php']:
             assert required in names, required
         source.extractall(package)
     env = os.environ.copy()

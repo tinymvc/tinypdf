@@ -257,6 +257,9 @@ function installPrebuilt(string $root, string $version): bool
 
 function buildFromSource(string $root): void
 {
+    if (!is_file("$root/native/CMakeLists.txt")) {
+        throw new RuntimeException('Native source code is not included in this Composer distribution. Please ensure internet access to download prebuilt release binaries, or clone from https://github.com/tinymvc/tinypdf.');
+    }
     $build = "$root/native/build";
     $configure = ['cmake', '-S', "$root/native", '-B', $build, '-DCMAKE_BUILD_TYPE=Release'];
     if (PHP_OS_FAMILY === 'Windows' && !is_file("$build/CMakeCache.txt")) {
