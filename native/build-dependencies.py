@@ -33,7 +33,7 @@ for name in ['icu','fribidi','harfbuzz']:
   build=folder/'build'
   args=['meson','setup',str(build),str(source),'--prefix='+str(PREFIX),'--libdir=lib','--buildtype=release','-Ddefault_library=shared']
   if build.exists():args+=['--reconfigure']
-  if name=='harfbuzz':args+=['-Dtests=disabled','-Ddocs=disabled','-Dutilities=enabled','-Dcairo=enabled','-Dfreetype=enabled','-Dpng=enabled','-Dzlib=enabled','-Dglib=enabled','-Dgobject=disabled','-Dicu=disabled','-Dgraphite2=disabled','-Dcoretext=auto','-Dgdi=auto','-Ddirectwrite=auto','-Draster=disabled','-Dvector=disabled','-Dgpu=disabled']
+  if name=='harfbuzz':args+=['-Dtests=disabled','-Ddocs=disabled','-Dutilities=enabled','-Dcairo=enabled','-Dfreetype=enabled','-Dpng=enabled','-Dzlib=enabled','-Dglib=enabled','-Dgobject=enabled','-Dicu=disabled','-Dgraphite2=disabled','-Dcoretext=auto','-Dgdi=auto','-Ddirectwrite=auto','-Draster=disabled','-Dvector=disabled','-Dgpu=disabled']
   else:args+=['-Ddocs=false','-Dtests=false']
   run(args,ROOT);run(['meson','compile','-C',build],ROOT);run(['meson','install','-C',build],ROOT)
  licenses=PREFIX/'share/licenses'/name;licenses.mkdir(parents=True,exist_ok=True)

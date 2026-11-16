@@ -201,8 +201,11 @@ class Engine {
             for (const auto &v : font->variations) coords.push_back(FT_Fixed(std::lround(v.value * 65536)));
             require(!FT_Set_Var_Design_Coordinates(font->ft, coords.size(), coords.data()), "Cannot instantiate font axes");
         }
-        const char *postscript = FT_Get_Postscript_Name(font->ft);
-        font->name = postscript ? postscript : "TinyPDFFont";
+        unsigned nameLength = hb_ot_name_get_utf8(font->face, HB_OT_NAME_ID_POSTSCRIPT_NAME, HB_LANGUAGE_INVALID, nullptr, nullptr) + 1;
+        font->name.resize(nameLength);
+        hb_ot_name_get_utf8(font->face, HB_OT_NAME_ID_POSTSCRIPT_NAME, HB_LANGUAGE_INVALID, &nameLength, font->name.data());
+        font->name.resize(nameLength);
+        if (font->name.empty()) font->name = "TinyPDFFont";
         FT_ULong glyfLength = 0;
         font->truetype = !FT_Load_Sfnt_Table(font->ft, HB_TAG('g','l','y','f'), 0, nullptr, &glyfLength);
         font->color = FT_HAS_COLOR(font->ft);
