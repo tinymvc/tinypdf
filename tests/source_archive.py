@@ -3,13 +3,16 @@
 import os
 import json
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+COMPOSER = shutil.which('composer')
+assert COMPOSER, 'Composer is required for the installation check'
 with tempfile.TemporaryDirectory(prefix='tinypdf-source-') as directory:
-    subprocess.run(['composer', 'archive', '--format=zip', '--dir=' + directory, '--file=tinypdf-1.1.0'], cwd=ROOT, check=True)
+    subprocess.run([COMPOSER, 'archive', '--format=zip', '--dir=' + directory, '--file=tinypdf-1.1.0'], cwd=ROOT, check=True)
     archive = pathlib.Path(directory) / 'tinypdf-1.1.0.zip'
     assert archive.stat().st_size < 2_000_000, 'Source archive includes build artifacts'
     package = pathlib.Path(directory) / 'installed'
@@ -34,7 +37,7 @@ with tempfile.TemporaryDirectory(prefix='tinypdf-source-') as directory:
             {'packagist.org': False},
         ],
     }))
-    subprocess.run(['composer', 'install', '--no-interaction', '--no-scripts', '--no-plugins'],
+    subprocess.run([COMPOSER, 'install', '--no-interaction', '--no-scripts', '--no-plugins'],
                    cwd=application, env=env, check=True)
     installed = application / 'vendor/tinymvc/tinypdf'
     assert not (installed / 'vendor').exists() and not (installed / 'tests').exists()
