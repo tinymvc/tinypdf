@@ -4,8 +4,8 @@ import argparse,hashlib,json,os,pathlib,platform,re,shutil,subprocess,tarfile,ur
 ROOT=pathlib.Path(__file__).resolve().parent
 parser=argparse.ArgumentParser();parser.add_argument('--binary',type=pathlib.Path,default=ROOT/'build'/('tinypdf-text.exe' if os.name=='nt' else 'tinypdf-text'));parser.add_argument('--output',type=pathlib.Path,default=ROOT.parent/'dist');args=parser.parse_args()
 system=platform.system().lower();arch={'aarch64':'arm64','x86_64':'x64','amd64':'x64'}.get(platform.machine().lower(),platform.machine().lower())
-name=f'tinypdf-text-1.1.0-{system}-{arch}'
-folder=args.output/name
+bundle_name=f'tinypdf-text-1.1.0-{system}-{arch}'
+folder=args.output/bundle_name
 if folder.exists():raise SystemExit(f'Package already exists: {folder}')
 (folder/'bin').mkdir(parents=True);(folder/'lib').mkdir();(folder/'licenses').mkdir()
 helper=folder/'bin'/(args.binary.name+'.bin' if system=='linux' else args.binary.name);shutil.copy2(args.binary,helper)
@@ -199,6 +199,6 @@ for dependency in ['harfbuzz','icu-uc','fribidi','freetype2','libbrotlidec','cai
 if system=='linux':versions['glibc']=platform.libc_ver()[1]
 files={str(p.relative_to(folder)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(folder.rglob('*')) if p.is_file()}
 (folder/'manifest.json').write_text(json.dumps(dict(version='1.1.0',platform=system,architecture=arch,dependencies=versions,library_licenses=license_inventory,notice_sources=source_inventory,files=files),indent=2)+'\n')
-archive=shutil.make_archive(str(args.output/name),'zip' if system=='windows' else 'gztar',root_dir=args.output,base_dir=name)
+archive=shutil.make_archive(str(args.output/bundle_name),'zip' if system=='windows' else 'gztar',root_dir=args.output,base_dir=bundle_name)
 path=pathlib.Path(archive);path.with_suffix(path.suffix+'.sha256').write_text(hashlib.sha256(path.read_bytes()).hexdigest()+'  '+path.name+'\n')
 print(path)

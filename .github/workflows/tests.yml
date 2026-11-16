@@ -48,7 +48,21 @@ jobs:
             tests/fonts
             tests/unicode
           key: unicode-fonts-${{ hashFiles('assets/font-packs.json', 'tests/unicode/manifest.json') }}
+      - name: Identify native dependency cache
+        id: native-key
+        run: echo "key=$(python native/build-dependencies.py --cache-key)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        id: native-libraries
+        with:
+          path: native/prefix
+          key: native-libraries-${{ steps.native-key.outputs.key }}
       - run: python native/build-dependencies.py
+        if: steps.native-libraries.outputs.cache-hit != 'true'
+      - uses: actions/cache/save@v4
+        if: steps.native-libraries.outputs.cache-hit != 'true'
+        with:
+          path: native/prefix
+          key: native-libraries-${{ steps.native-key.outputs.key }}
       - name: Build and verify
         shell: bash
         run: |

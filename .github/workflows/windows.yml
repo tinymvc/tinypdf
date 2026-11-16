@@ -49,10 +49,27 @@ jobs:
             tests/unicode
           key: windows-fixtures-${{ hashFiles('native/sources.lock.json', 'assets/font-packs.json', 'tests/unicode/manifest.json') }}
           restore-keys: windows-fixtures-
+      - name: Identify native dependency cache
+        id: native-key
+        shell: msys2 {0}
+        run: echo "key=$(python native/build-dependencies.py --cache-key)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        id: native-libraries
+        with:
+          path: native/prefix
+          key: native-libraries-${{ steps.native-key.outputs.key }}
+      - name: Build pinned native libraries
+        if: steps.native-libraries.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: python native/build-dependencies.py
+      - uses: actions/cache/save@v4
+        if: steps.native-libraries.outputs.cache-hit != 'true'
+        with:
+          path: native/prefix
+          key: native-libraries-${{ steps.native-key.outputs.key }}
       - name: Build native helper
         shell: msys2 {0}
         run: |
-          python native/build-dependencies.py
           export PKG_CONFIG_PATH="$PWD/native/prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
           export PATH="$PWD/native/prefix/bin:$PATH"
           cmake -S native -B native/build -G Ninja -DCMAKE_BUILD_TYPE=Release

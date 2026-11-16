@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """Build the pinned text engines in native/prefix; system Cairo/RSVG stay dynamic."""
-import hashlib,json,os,pathlib,shutil,subprocess,tarfile,time,urllib.request
+import hashlib,json,os,pathlib,shutil,subprocess,tarfile,time,urllib.request,sys,platform
 ROOT=pathlib.Path(__file__).resolve().parent
 PREFIX=ROOT/'prefix'
 DOWNLOADS=ROOT/'downloads'
 SOURCES=ROOT/'build/dependencies'
 for directory in [PREFIX,DOWNLOADS,SOURCES]:directory.mkdir(parents=True,exist_ok=True)
 lock=json.loads((ROOT/'sources.lock.json').read_text())
+if '--cache-key' in sys.argv:
+ identity=dict(sources=lock,builder=hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),
+  platform=platform.platform(),prefix=str(PREFIX),image=os.environ.get('ImageVersion',''),
+  compiler=subprocess.check_output(['c++','--version']).decode(),
+  graphics=subprocess.check_output(['pkg-config','--modversion','cairo','librsvg-2.0','glib-2.0','libpng']).decode())
+ print(hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest())
+ raise SystemExit(0)
 env=os.environ.copy()
 env['PATH']=str(PREFIX/'bin')+os.pathsep+env.get('PATH','')
 env['PKG_CONFIG_PATH']=str(PREFIX/'lib/pkgconfig')+os.pathsep+str(PREFIX/'share/pkgconfig')+os.pathsep+env.get('PKG_CONFIG_PATH','')
