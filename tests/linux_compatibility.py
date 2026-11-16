@@ -17,11 +17,13 @@ with tempfile.TemporaryDirectory(prefix='tinypdf-linux-') as directory:
     for image in images:
         subprocess.run(['docker', 'pull', image], check=True)
         command = ['docker', 'run', '--rm', '-i', '--network=none',
-                   '-v', f'{ROOT}:{ROOT}:ro', '-w', str(ROOT), image, str(helper)]
+                   '-v', f'{ROOT}:{ROOT}:ro', '-v', f'{directory}:{directory}:ro',
+                   '-w', str(ROOT), image, str(helper)]
         wrapper.write_text('#!/bin/sh\nexec ' + shlex.join(command) + ' "$@"\n')
         wrapper.chmod(0o755)
         env = os.environ.copy()
         env['TINYPDF_TEXT_HELPER'] = str(wrapper)
+        env['TMPDIR'] = directory
         print('Verifying Linux runtime in', image, flush=True)
         subprocess.run(['php', str(ROOT / 'bin/tinypdf-check.php'), str(wrapper)], env=env, cwd=ROOT, check=True)
         subprocess.run(['php', str(ROOT / 'tests/run.php'), 'FontFormats'], env=env, cwd=ROOT, check=True)
