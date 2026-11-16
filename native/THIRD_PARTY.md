@@ -8,6 +8,7 @@ TinyPDF 1.1.0 uses dynamically linked libraries. The text engines are pinned by 
 | HarfBuzz | MIT-style | https://github.com/harfbuzz/harfbuzz |
 | ICU and Unicode data | Unicode-3.0 | https://github.com/unicode-org/icu |
 | FriBidi | LGPL-2.1-or-later | https://github.com/fribidi/fribidi |
+| Brotli | MIT | https://github.com/google/brotli |
 | FreeType | FreeType License (or GPL-2.0) | https://gitlab.freedesktop.org/freetype/freetype |
 | Cairo | LGPL-2.1 or MPL-1.1 | https://gitlab.freedesktop.org/cairo/cairo |
 | librsvg | LGPL-2.1-or-later | https://gitlab.gnome.org/GNOME/librsvg |

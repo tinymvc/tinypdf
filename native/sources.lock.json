@@ -28,6 +28,13 @@
       "file": "freetype-2.14.3.tar.xz",
       "url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz",
       "sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f"
+    },
+    {
+      "name": "brotli",
+      "version": "1.2.1",
+      "file": "brotli-1.2.1.tar.gz",
+      "url": "https://github.com/google/brotli/archive/refs/tags/v1.2.1.tar.gz",
+      "sha256": "98d35d11a78dc453aebb7d10c3748f3f73ff78c8267c0dc697b8631f67bf7e8f"
     }
   ]
 }

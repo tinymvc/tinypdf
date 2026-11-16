@@ -31,6 +31,13 @@ foreach ([
 ] as [$text, $family]) {
     $cases[] = ['text' => trim($text), 'family' => $family];
 }
+foreach ([
+    ['চালান ০০১২৩৪ — মোট ৳১,২৩৪.৫০ — 1234.50 USD', 'notosansbengali', 'ltr'],
+    ['فاتورة ١٢٣٤ — الإجمالي ١٢٣٫٤٥ USD 123.45', 'notonaskharabic', 'rtl'],
+    ['شماره ۱۲۳۴ — مبلغ ۱۲۳٫۴۵ USD 123.45', 'notonaskharabic', 'rtl'],
+] as [$text, $family, $direction]) {
+    $cases[] = compact('text', 'family', 'direction');
+}
 $cases[] = ['text' => implode('', array_map(static fn($cp) => mb_chr($cp, 'UTF-8'), range(0x4e00, 0x4f67))), 'family' => 'notosansjp', 'size' => 1];
 $vertical = '日本語の縦書き。TinyPDF 1.1.0 正確な文字配置。こんにちは、世界。';
 foreach (['vertical-rl', 'vertical-lr'] as $mode) {

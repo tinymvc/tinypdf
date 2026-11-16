@@ -86,7 +86,7 @@ final class LogicalText
         if ($rtl) {
             $text = preg_replace_callback('/[\p{Arabic}\p{Hebrew}\p{M}]+/u',
                 static fn($match) => $match[0] . (preg_match('/\p{M}$/u', $match[0]) ? "\u{200F}" : ''), $text);
-            $text = preg_replace('/[ -~]*[!-~][ -~]*/u', "\u{200E}$0\u{200E}", $text);
+            $text = preg_replace('/[ -~\p{N}\x{066B}\x{066C}]*[!-~\p{N}\x{066B}\x{066C}][ -~\p{N}\x{066B}\x{066C}]*/u', "\u{200E}$0\u{200E}", $text);
             $analysis = $this->helper->request('analyze', ['text' => $text, 'baseLevel' => 0]);
             $characters = mb_str_split($text, 1, 'UTF-8');
             $order = array_unique(array_map(static fn($index) => $analysis['utf16ToCharacter'][$index], $analysis['order']));

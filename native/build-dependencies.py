@@ -12,7 +12,7 @@ env['PATH']=str(PREFIX/'bin')+os.pathsep+env.get('PATH','')
 env['PKG_CONFIG_PATH']=str(PREFIX/'lib/pkgconfig')+os.pathsep+str(PREFIX/'share/pkgconfig')+os.pathsep+env.get('PKG_CONFIG_PATH','')
 env['LD_LIBRARY_PATH']=str(PREFIX/'lib')+os.pathsep+env.get('LD_LIBRARY_PATH','')
 def run(args,cwd):subprocess.run([str(x) for x in args],cwd=cwd,env=env,check=True)
-for name in ['freetype','icu','fribidi','harfbuzz']:
+for name in ['brotli','freetype','icu','fribidi','harfbuzz']:
  entry=next(x for x in lock['sources'] if x['name']==name)
  archive=DOWNLOADS/entry['file']
  if not archive.exists():
@@ -30,7 +30,12 @@ for name in ['freetype','icu','fribidi','harfbuzz']:
   folder.mkdir()
   with tarfile.open(archive) as tar:tar.extractall(folder,filter='data')
  source=next(x for x in folder.iterdir() if x.is_dir() and x.name!='build')
- if name=='icu':
+ if name=='brotli':
+  build=folder/'build'
+  run(['cmake','-S',source,'-B',build,'-G','Ninja','-DCMAKE_BUILD_TYPE=Release','-DBUILD_SHARED_LIBS=ON','-DBROTLI_BUILD_TOOLS=OFF','-DBROTLI_DISABLE_TESTS=ON','-DCMAKE_INSTALL_LIBDIR=lib','-DCMAKE_INSTALL_PREFIX='+str(PREFIX)],ROOT)
+  run(['cmake','--build',build,'--parallel',str(min(os.cpu_count() or 2,8))],ROOT)
+  run(['cmake','--install',build],ROOT)
+ elif name=='icu':
   source=source/'source'
   run(['sh','configure','--prefix='+str(PREFIX),'--libdir='+str(PREFIX/'lib'),'--enable-rpath','--disable-tests','--disable-samples','--with-data-packaging=library'],source)
   run(['make','-j',str(min(os.cpu_count() or 2,8))],source)

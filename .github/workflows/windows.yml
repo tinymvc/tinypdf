@@ -48,6 +48,7 @@ jobs:
             tests/fonts
             tests/unicode
           key: windows-fixtures-${{ hashFiles('native/sources.lock.json', 'assets/font-packs.json', 'tests/unicode/manifest.json') }}
+          restore-keys: windows-fixtures-
       - name: Build native helper
         shell: msys2 {0}
         run: |

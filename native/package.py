@@ -149,7 +149,7 @@ shutil.copy2(ROOT/'vendor/json.LICENSE',folder/'licenses/json.LICENSE')
 shutil.copy2(ROOT/'sources.lock.json',folder/'sources.lock.json')
 shutil.copy2(ROOT/'THIRD_PARTY.md',folder/'THIRD_PARTY.md')
 versions={}
-for dependency in ['harfbuzz','icu-uc','fribidi','freetype2','cairo','librsvg-2.0','libpng']:
+for dependency in ['harfbuzz','icu-uc','fribidi','freetype2','libbrotlidec','cairo','librsvg-2.0','libpng']:
  versions[dependency]=output(['pkg-config','--modversion',dependency]).strip()
 if system=='linux':versions['glibc']=platform.libc_ver()[1]
 files={str(p.relative_to(folder)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(folder.rglob('*')) if p.is_file()}
