@@ -8,13 +8,15 @@ name=f'tinypdf-text-1.1.0-{system}-{arch}'
 folder=args.output/name
 if folder.exists():raise SystemExit(f'Package already exists: {folder}')
 (folder/'bin').mkdir(parents=True);(folder/'lib').mkdir();(folder/'licenses').mkdir()
-helper=folder/'bin'/args.binary.name;shutil.copy2(args.binary,helper)
+helper=folder/'bin'/(args.binary.name+'.bin' if system=='linux' else args.binary.name);shutil.copy2(args.binary,helper)
 def output(command):return subprocess.check_output(command,text=True)
 def dependencies(path):
  if system=='darwin':
   return [line.strip().split(' (')[0] for line in output(['otool','-L',str(path)]).splitlines()[1:] if not line.strip().startswith(('/usr/lib/','/System/'))]
  if system=='linux':
-  return re.findall(r'=> (/\S+)',output(['ldd',str(path)]))
+  if path.name.startswith('ld-linux'):return []
+  linked=output(['ldd',str(path)])
+  return re.findall(r'=> (/\S+)',linked)+re.findall(r'^\s*(/\S+)\s+\(',linked,re.MULTILINE)
  names=re.findall(r'DLL Name:\s*(\S+)',output(['objdump','-p',str(path)]))
  found=[]
  for dll in names:
@@ -34,7 +36,6 @@ while queue:
    candidates=[original.parent/dependency[7:],ROOT/'prefix/lib'/dependency[7:]]
    dependency=str(next((p for p in candidates if p.is_file()),pathlib.Path(dependency)))
   path=pathlib.Path(dependency)
-  if path.name in baseline or path.name.startswith('ld-linux'):continue
   if path.resolve()==original.resolve():continue
   if not path.is_file():raise SystemExit(f'Unresolved dependency: {dependency}')
   source=str(path.resolve())
@@ -53,7 +54,15 @@ for binary in [helper,*[(folder/'bin' if system=='windows' else folder/'lib')/na
  if system=='darwin':
   if binary!=helper:subprocess.run(['install_name_tool','-id','@loader_path/'+binary.name,str(binary)],check=True)
   subprocess.run(['codesign','--force','--sign','-',str(binary)],check=True,stdout=subprocess.DEVNULL)
- elif system=='linux':subprocess.run(['patchelf','--set-rpath','$ORIGIN/../lib' if binary==helper else '$ORIGIN',str(binary)],check=True)
+ elif system=='linux' and binary.name not in baseline and not binary.name.startswith('ld-linux'):
+  subprocess.run(['patchelf','--set-rpath','$ORIGIN/../lib' if binary==helper else '$ORIGIN',str(binary)],check=True)
+if system=='linux':
+ loaders=[name for name in copied if name.startswith('ld-linux')]
+ if len(loaders)!=1:raise SystemExit('Expected one private Linux dynamic loader')
+ launcher=folder/'bin'/'tinypdf-text'
+ launcher.write_text('#!/bin/sh\ndirectory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P) || exit 1\n'
+  +f'exec "$directory/../lib/{loaders[0]}" --inhibit-cache --library-path "$directory/../lib" "$directory/{helper.name}" "$@"\n')
+ launcher.chmod(0o755)
 # Preserve legal notices for every bundled library, including transitive ones.
 license_names={'copying','copying.lib','license','license.txt','license.html','ftl.txt','copyright'}
 license_inventory={}
@@ -142,6 +151,7 @@ shutil.copy2(ROOT/'THIRD_PARTY.md',folder/'THIRD_PARTY.md')
 versions={}
 for dependency in ['harfbuzz','icu-uc','fribidi','freetype2','cairo','librsvg-2.0','libpng']:
  versions[dependency]=output(['pkg-config','--modversion',dependency]).strip()
+if system=='linux':versions['glibc']=platform.libc_ver()[1]
 files={str(p.relative_to(folder)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(folder.rglob('*')) if p.is_file()}
 (folder/'manifest.json').write_text(json.dumps(dict(version='1.1.0',platform=system,architecture=arch,dependencies=versions,library_licenses=license_inventory,notice_sources=source_inventory,files=files),indent=2)+'\n')
 archive=shutil.make_archive(str(args.output/name),'zip' if system=='windows' else 'gztar',root_dir=args.output,base_dir=name)

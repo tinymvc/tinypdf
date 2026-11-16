@@ -4,6 +4,7 @@ TinyPDF 1.1.0 uses dynamically linked libraries. The text engines are pinned by 
 
 | Component | License | Upstream source |
 |---|---|---|
+| GNU C Library (Linux bundles) | LGPL-2.1-or-later; see distribution copyright files | https://sourceware.org/glibc/ |
 | HarfBuzz | MIT-style | https://github.com/harfbuzz/harfbuzz |
 | ICU and Unicode data | Unicode-3.0 | https://github.com/unicode-org/icu |
 | FriBidi | LGPL-2.1-or-later | https://github.com/fribidi/fribidi |

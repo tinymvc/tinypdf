@@ -29,7 +29,7 @@ Cairo, librsvg, libpng, Brotli and their platform dependencies must already be i
 
 `cmake --install native/build --prefix /desired/location` installs the executable. For a relocatable bundle, run `python3 native/package.py`, then run the diagnostic against the resulting `dist/.../bin/tinypdf-text`. Copy **both** `bin/` and `lib/` when installing a macOS/Linux bundle. Windows DLLs live alongside the executable.
 
-Linux release builds target glibc 2.39 (Ubuntu 24.04), x64 and ARM64. Other libc environments, including musl, need a source build. The CI matrix also defines macOS Intel/Apple Silicon and Windows x64 jobs. The CI jobs build and test the helper on each target before creating an archive.
+Linux x64/ARM64 archives include a private glibc runtime and loader, so they do not require the host distribution to provide a matching glibc. Use the `bin/tinypdf-text` launcher; it leaves system libraries unchanged. The Linux compatibility checks exercise AlmaLinux 8, Ubuntu 20.04, Alpine, and Arch Linux userlands. Other CPU architectures need a source build. The CI matrix also defines macOS Intel/Apple Silicon and Windows x64 jobs. The CI jobs build and test the helper on each target before creating an archive.
 
 ## Distribution
 

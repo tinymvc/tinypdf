@@ -69,6 +69,9 @@ jobs:
           python tests/source_archive.py
           python native/package.py
           python tests/package.py "$(find dist -name '*.tar.gz' -type f | head -1)"
+      - name: Verify Linux distribution compatibility
+        if: runner.os == 'Linux' && matrix.php == '8.4'
+        run: python tests/linux_compatibility.py
       - name: Diagnose native crashes
         if: failure() && runner.os == 'macOS'
         run: |
