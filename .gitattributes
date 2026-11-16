@@ -1,2 +1,15 @@
 /tests export-ignore
 /vendor export-ignore
+/native/build export-ignore
+/native/prefix export-ignore
+/native/downloads export-ignore
+/native/__pycache__ export-ignore
+/dist export-ignore
+/output export-ignore
+/fonts export-ignore
+/.github export-ignore
+/.gitignore export-ignore
+/composer.lock export-ignore
+/node_modules export-ignore
+/.venv export-ignore
+/package-lock.json export-ignore

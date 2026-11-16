@@ -66,6 +66,7 @@ jobs:
           python tests/unicode_conformance.py
           python tests/rendering.py
           php tests/benchmark.php > tests/performance.json
+          python tests/source_archive.py
           python native/package.py
           python tests/package.py "$(find dist -name '*.tar.gz' -type f | head -1)"
       - name: Diagnose native crashes

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Bundle a tested helper with its non-system shared libraries and a checksum inventory."""
-import argparse,hashlib,json,os,pathlib,platform,re,shutil,subprocess
+import argparse,hashlib,json,os,pathlib,platform,re,shutil,subprocess,tarfile,urllib.request
 ROOT=pathlib.Path(__file__).resolve().parent
 parser=argparse.ArgumentParser();parser.add_argument('--binary',type=pathlib.Path,default=ROOT/'build'/('tinypdf-text.exe' if os.name=='nt' else 'tinypdf-text'));parser.add_argument('--output',type=pathlib.Path,default=ROOT.parent/'dist');args=parser.parse_args()
 system=platform.system().lower();arch={'aarch64':'arm64','x86_64':'x64','amd64':'x64'}.get(platform.machine().lower(),platform.machine().lower())
@@ -57,14 +57,42 @@ for binary in [helper,*[(folder/'bin' if system=='windows' else folder/'lib')/na
 # Preserve legal notices for every bundled library, including transitive ones.
 license_names={'copying','copying.lib','license','license.txt','license.html','ftl.txt','copyright'}
 license_inventory={}
+source_inventory={}
+formula_notices={}
+def is_notice(path):
+ return path.name.lower() in license_names or path.name.upper().startswith(('LICENSE','COPYING','COPYRIGHT','NOTICE','AUTHORS')) or 'licenses' in [part.lower() for part in path.parts]
 def copy_notices(directory, package):
  notices=[]
  if directory.is_dir():
   for document in directory.rglob('*'):
-   if document.is_file() and (document.name.lower() in license_names or document.name.upper().startswith(('LICENSE','COPYING'))):
+   if document.is_file() and is_notice(document.relative_to(directory)):
     target=folder/'licenses'/package/document.relative_to(directory)
     target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(document,target)
     notices.append(str(target.relative_to(folder)))
+ return notices
+def homebrew_source_notices(cellar):
+ package=cellar.parent.name
+ if package in formula_notices:return formula_notices[package]
+ info=json.loads(output(['brew','info','--json=v2',package]))['formulae'][0]
+ version=info['versions']['stable']
+ if cellar.name.split('_')[0]!=version:raise SystemExit(f'Cannot identify installed source version for {cellar}')
+ source=info['urls']['stable']
+ checksum=source['checksum']
+ archive=ROOT/'downloads'/(checksum+'-'+pathlib.Path(source['url']).name)
+ archive.parent.mkdir(exist_ok=True)
+ if not archive.is_file():
+  with urllib.request.urlopen(source['url'],timeout=120) as response:archive.write_bytes(response.read())
+ if hashlib.sha256(archive.read_bytes()).hexdigest()!=checksum:raise SystemExit(f'Source checksum mismatch: {package}')
+ notices=[]
+ with tarfile.open(archive) as contents:
+  for member in contents:
+   relative=pathlib.PurePosixPath(member.name)
+   if not member.isfile() or relative.is_absolute() or '..' in relative.parts or not is_notice(relative):continue
+   target=folder/'licenses'/package/pathlib.Path(*relative.parts[1:])
+   target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(contents.extractfile(member).read())
+   notices.append(str(target.relative_to(folder)))
+ source_inventory[package]=dict(version=version,url=source['url'],sha256=checksum,homepage=info['homepage'])
+ formula_notices[package]=notices
  return notices
 pinned_notices=copy_notices(ROOT/'prefix/share/licenses','pinned')
 for filename,library in copied.items():
@@ -77,12 +105,16 @@ for filename,library in copied.items():
   cellar=next((parent for parent in path.parents if parent.parent.parent.name=='Cellar'),None)
   if cellar:
    notices=copy_notices(cellar,cellar.parent.name)
+   if not notices:notices=homebrew_source_notices(cellar)
   elif str(path).startswith('/opt/local/'):
    result=subprocess.run(['port','provides',library],text=True,capture_output=True)
    match=re.search(r'provided by: (\S+)',result.stdout)
    if match:notices=copy_notices(pathlib.Path('/opt/local/share/doc')/match[1],match[1])
  elif system=='linux':
   result=subprocess.run(['dpkg-query','-S',library],text=True,capture_output=True)
+  if result.returncode:
+   # usr-merged installations may register /lib while ldd resolves /usr/lib.
+   result=subprocess.run(['dpkg-query','-S','*/'+path.name],text=True,capture_output=True)
   for line in result.stdout.splitlines():
    package=line.split(': ')[0].split(':')[0]
    notices+=copy_notices(pathlib.Path('/usr/share/doc')/package,package)
@@ -111,7 +143,7 @@ versions={}
 for dependency in ['harfbuzz','icu-uc','fribidi','freetype2','cairo','librsvg-2.0','libpng']:
  versions[dependency]=output(['pkg-config','--modversion',dependency]).strip()
 files={str(p.relative_to(folder)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(folder.rglob('*')) if p.is_file()}
-(folder/'manifest.json').write_text(json.dumps(dict(version='1.1.0',platform=system,architecture=arch,dependencies=versions,library_licenses=license_inventory,files=files),indent=2)+'\n')
+(folder/'manifest.json').write_text(json.dumps(dict(version='1.1.0',platform=system,architecture=arch,dependencies=versions,library_licenses=license_inventory,notice_sources=source_inventory,files=files),indent=2)+'\n')
 archive=shutil.make_archive(str(args.output/name),'zip' if system=='windows' else 'gztar',root_dir=args.output,base_dir=name)
 path=pathlib.Path(archive);path.with_suffix(path.suffix+'.sha256').write_text(hashlib.sha256(path.read_bytes()).hexdigest()+'  '+path.name+'\n')
 print(path)
