@@ -41,7 +41,7 @@ foreach ([
     }
 }
 
-$version = class_exists(\Spark\Pdf\HtmlPdf::class) ? \Spark\Pdf\HtmlPdf::VERSION : '1.2.0';
+$version = class_exists(\Spark\Pdf\HtmlPdf::class) ? \Spark\Pdf\HtmlPdf::VERSION : '1.2.1';
 $suffix = PHP_OS_FAMILY === 'Windows' ? '.exe' : '';
 $binaryPath = "$root/bin/tinypdf-text$suffix";
 $buildBinaryPath = "$root/native/build/tinypdf-text$suffix";

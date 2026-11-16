@@ -39,7 +39,7 @@ use function strlen;
  */
 final class HtmlPdf
 {
-    public const VERSION = '1.2.0';
+    public const VERSION = '1.2.1';
     private const PX = 0.75;          // 1 CSS px in points
     private const MM = 72 / 25.4;     // 1 mm in points
     private const SIDES = ['top', 'right', 'bottom', 'left'];

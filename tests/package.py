@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -12,6 +13,8 @@ import tempfile
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+_vm = re.search(r"public const VERSION = '([^']+)';", (ROOT / 'src/HtmlPdf.php').read_text())
+VERSION = _vm[1] if _vm else '1.2.1'
 archive = pathlib.Path(sys.argv[1]).resolve()
 expected = archive.with_suffix(archive.suffix + '.sha256').read_text().split()[0]
 assert hashlib.sha256(archive.read_bytes()).hexdigest() == expected
@@ -24,7 +27,7 @@ with tempfile.TemporaryDirectory(prefix='tinypdf-installed-') as directory:
             package.extractall(directory, filter='data')
     folder = next(pathlib.Path(directory).iterdir())
     manifest = json.loads((folder / 'manifest.json').read_text())
-    assert manifest['version'] == '1.2.0' and manifest['library_licenses']
+    assert manifest['version'] == VERSION and manifest['library_licenses']
     for name, digest in manifest['files'].items():
         assert hashlib.sha256((folder / name).read_bytes()).hexdigest() == digest, name
     for library, notices in manifest['library_licenses'].items():

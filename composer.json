@@ -58,7 +58,7 @@
     ],
     "extra": {
         "tinypdf": {
-            "version": "1.2.0",
+            "version": "1.2.1",
             "text-protocol": 1
         }
     }

@@ -3,7 +3,7 @@
 import argparse,hashlib,json,os,pathlib,platform,re,shutil,subprocess,tarfile,urllib.request
 ROOT=pathlib.Path(__file__).resolve().parent
 cm_text = (ROOT/'CMakeLists.txt').read_text()
-default_ver = (re.search(r'project\(tinypdf_text\s+VERSION\s+([0-9.]+)', cm_text) or [None, '1.2.0'])[1]
+default_ver = (re.search(r'project\(tinypdf_text\s+VERSION\s+([0-9.]+)', cm_text) or [None, '1.2.1'])[1]
 parser=argparse.ArgumentParser();parser.add_argument('--binary',type=pathlib.Path,default=ROOT/'build'/('tinypdf-text.exe' if os.name=='nt' else 'tinypdf-text'));parser.add_argument('--output',type=pathlib.Path,default=ROOT.parent/'dist');parser.add_argument('--version',default=default_ver);args=parser.parse_args()
 system=platform.system().lower();arch={'aarch64':'arm64','x86_64':'x64','amd64':'x64'}.get(platform.machine().lower(),platform.machine().lower())
 bundle_name=f'tinypdf-text-{args.version}-{system}-{arch}'
