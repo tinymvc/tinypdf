@@ -174,7 +174,14 @@ final class NativeHelper
 
     private function fail(string $message): never
     {
+        if (isset($this->pipes[2]) && is_resource($this->pipes[2])) {
+            $this->diagnostics = substr($this->diagnostics . (stream_get_contents($this->pipes[2]) ?: ''), -8192);
+        }
         $diagnostics = trim($this->diagnostics);
+        if (is_resource($this->process)) {
+            $status = proc_get_status($this->process);
+            if (!$status['running']) $message .= sprintf(' (exit %d, signal %d)', $status['exitcode'], $status['termsig']);
+        }
         if ($this->operation !== '') $message .= ' during ' . $this->operation;
         $this->failed = true;
         $this->close();

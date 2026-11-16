@@ -117,7 +117,7 @@ Json Engine::subset(const Json &request) {
         require(gid < hb_face_get_glyph_count(font.face), "Invalid glyph ID");
         widths[std::to_string(gid)] = hb_font_get_glyph_h_advance(font.font, gid) * 1000.0 / font.upem;
     }
-    if (!font.truetype) {
+    if (!font.truetype || font.color) {
         auto data = cidCff(font, glyphs);
         return {{"format", "cff"}, {"data", base64(reinterpret_cast<const unsigned char *>(data.data()), data.size())},
             {"widths", widths}, {"mapping", mapping}};
