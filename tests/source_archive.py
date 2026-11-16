@@ -18,7 +18,7 @@ VERSION = _vm[1] if _vm else '1.2.0'
 with tempfile.TemporaryDirectory(prefix='tinypdf-source-') as directory:
     subprocess.run([COMPOSER, 'archive', '--format=zip', '--dir=' + directory, '--file=tinypdf-' + VERSION], cwd=ROOT, check=True)
     archive = pathlib.Path(directory) / f'tinypdf-{VERSION}.zip'
-    assert archive.stat().st_size < 2_000_000, 'Source archive includes build artifacts'
+    assert archive.stat().st_size < 2_000_000, f'Source archive includes build artifacts: {archive.stat().st_size} bytes'
     package = pathlib.Path(directory) / 'installed'
     with zipfile.ZipFile(archive) as source:
         names = source.namelist()
