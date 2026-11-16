@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-helper = next((ROOT / 'dist').glob('tinypdf-text-1.1.0-linux-*/bin/tinypdf-text'))
+helper = next((ROOT / 'dist').glob('tinypdf-text-*-linux-*/bin/tinypdf-text'))
 images = ['almalinux:8', 'ubuntu:20.04', 'alpine:3.22']
 if platform.machine() in ('x86_64', 'amd64'):
     images.append('archlinux:latest')

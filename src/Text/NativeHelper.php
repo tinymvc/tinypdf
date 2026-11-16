@@ -42,6 +42,24 @@ final class NativeHelper
         }
         $suffix = PHP_OS_FAMILY === 'Windows' ? '.exe' : '';
         $root = dirname(__DIR__, 2);
+
+        $prefixBin = "$root/native/prefix/bin";
+        if (is_dir($prefixBin)) {
+            $curPath = getenv('PATH') ?: '';
+            if (!str_contains($curPath, $prefixBin)) {
+                putenv('PATH=' . $prefixBin . PATH_SEPARATOR . $curPath);
+                $_SERVER['PATH'] = $prefixBin . PATH_SEPARATOR . $curPath;
+            }
+        }
+        $prefixLib = "$root/native/prefix/lib";
+        if (is_dir($prefixLib) && PHP_OS_FAMILY !== 'Windows') {
+            $ld = getenv('LD_LIBRARY_PATH') ?: '';
+            if (!str_contains($ld, $prefixLib)) {
+                putenv('LD_LIBRARY_PATH=' . $prefixLib . PATH_SEPARATOR . $ld);
+                $_SERVER['LD_LIBRARY_PATH'] = $prefixLib . PATH_SEPARATOR . $ld;
+            }
+        }
+
         $path = $this->options->helperPath ?? getenv('TINYPDF_TEXT_HELPER') ?: "$root/bin/tinypdf-text$suffix";
         if ($this->options->helperPath === null && !getenv('TINYPDF_TEXT_HELPER') && !is_file($path)) {
             $path = "$root/native/build/tinypdf-text$suffix";

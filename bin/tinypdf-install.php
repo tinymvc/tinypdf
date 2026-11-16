@@ -9,6 +9,24 @@ if (!is_file("$root/composer.json") && is_file(dirname(__DIR__, 2) . '/composer.
     $root = dirname(__DIR__, 2);
 }
 
+// Ensure development/CI prefix paths are searchable for DLLs and libraries
+$prefixBin = "$root/native/prefix/bin";
+if (is_dir($prefixBin)) {
+    $curPath = getenv('PATH') ?: '';
+    if (!str_contains($curPath, $prefixBin)) {
+        putenv('PATH=' . $prefixBin . PATH_SEPARATOR . $curPath);
+        $_SERVER['PATH'] = $prefixBin . PATH_SEPARATOR . $curPath;
+    }
+}
+$prefixLib = "$root/native/prefix/lib";
+if (is_dir($prefixLib) && PHP_OS_FAMILY !== 'Windows') {
+    $ld = getenv('LD_LIBRARY_PATH') ?: '';
+    if (!str_contains($ld, $prefixLib)) {
+        putenv('LD_LIBRARY_PATH=' . $prefixLib . PATH_SEPARATOR . $ld);
+        $_SERVER['LD_LIBRARY_PATH'] = $prefixLib . PATH_SEPARATOR . $ld;
+    }
+}
+
 // Locate autoloader if available
 $autoload = null;
 foreach ([
