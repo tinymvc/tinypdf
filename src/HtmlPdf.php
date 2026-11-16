@@ -19,6 +19,7 @@ use Spark\Pdf\Layout\FlexEngine;
 use Spark\Pdf\Layout\InlineBox;
 use Spark\Pdf\Layout\TableEngine;
 use Spark\Pdf\Text\ShapedRun;
+use Spark\Pdf\Text\LogicalText;
 use function array_key_exists;
 use function array_slice;
 use function chr;
@@ -32,7 +33,7 @@ use function sprintf;
 use function strlen;
 
 /**
- * Pure-PHP renderer for a documented subset of HTML/CSS document templates.
+ * HTML/CSS renderer for a documented subset of HTML/CSS document templates.
  * See README.md for font, shaping, layout, and resource-trust limits.
  *
  * @author Shahin Moyshan <shahin.moyshan2@gmail.com>
@@ -280,6 +281,7 @@ final class HtmlPdf
 
     private FontManager $fontManager;
     private GraphicState $graphicState;
+    private LogicalText $logicalText;
     private ?string $pageBackgroundImage = null;
     private ?array $bodyBackground = null;
     private float $pageBackgroundOpacity = 1.0;
@@ -311,6 +313,7 @@ final class HtmlPdf
         $this->textOptions ??= new TextOptions();
         $this->fontManager = new FontManager($this->textOptions);
         $this->graphicState = new GraphicState();
+        $this->logicalText = new LogicalText();
     }
 
     // ------------------------------------------------------------- public API
@@ -484,6 +487,8 @@ final class HtmlPdf
 
         // Build ExtGState Resources
         $extGStateRes = $this->graphicState->getResourceDict($extraObjects, $id);
+
+        $extGStateRes .= $this->logicalText->buildResources($extraObjects, $id, $fontRes, $imageRes, $extGStateRes);
 
         // Pass bookmarks to writer
         foreach ($this->bookmarks as $bm) {
@@ -2632,6 +2637,8 @@ final class HtmlPdf
             default => 0.0,
         };
 
+        $start = count($this->ops);
+        $origin = $cx;
         $this->ops[] = $this->actualTextStart($line['text'] ?? '');
         $run = null;
         foreach ($line['items'] as $it) {
@@ -2674,6 +2681,11 @@ final class HtmlPdf
         }
         $this->flushRun($run, $base);
         $this->ops[] = "EMC Q\n";
+        if (!$this->measuring) {
+            $appearance = implode('', array_splice($this->ops, $start));
+            $this->ops[] = $this->logicalText->wrap($line['text'] ?? '', $appearance, $origin,
+                $this->pageH - $base, $cx - $origin, $ascent, $descent);
+        }
         $this->y += $height;
     }
 
@@ -3085,6 +3097,7 @@ final class HtmlPdf
     {
         $item = ['t' => 'w', 'x' => $text, 'w' => 0.0, 's' => $s, 'k' => ''];
         $lines = $this->fontManager->layout([$item], 1e9, $s);
+        $origin = $x;
         $out = $this->actualTextStart($text);
         foreach ($lines as $line) {
             foreach ($line['items'] as $run) {
@@ -3092,7 +3105,9 @@ final class HtmlPdf
                 $x += $run['w'];
             }
         }
-        return $out . "EMC Q\n";
+        $out .= "EMC Q\n";
+        return $this->measuring ? $out : $this->logicalText->wrap($text, $out, $origin,
+            $this->pageH - $baseline, $x - $origin, $s['size'], $s['size'] * .4);
     }
 
     private function shapedTextOp(ShapedRun $run, float $x, float $baseline, array $s, float $wordSpace = 0.0): string
@@ -3168,6 +3183,15 @@ final class HtmlPdf
         $top = $this->y;
         $used = 0.0;
         $extent = 0.0;
+        $blockStart = count($this->ops);
+        $blockText = '';
+        $flushColumns = function () use (&$blockStart, &$blockText, &$used, &$extent, &$top, $x, $width, $s): void {
+            if ($this->measuring || $blockText === '') return;
+            $appearance = implode('', array_splice($this->ops, $blockStart));
+            $left = $s['writingMode'] === 'vertical-rl' ? $x + $width - $used : $x;
+            $this->ops[] = $this->logicalText->wrap($blockText, $appearance, $left,
+                $this->pageH - $top - $extent, $used, $extent, 0);
+        };
         foreach ($lines as $line) {
             $column = $s['size'] * ($s['lh'] ?? 1.4);
             foreach ($line['items'] as $item) {
@@ -3176,7 +3200,10 @@ final class HtmlPdf
             }
             if ($used > 0 && $used + $column > $width + .01) {
                 if (!$this->allowBreak) throw new RuntimeException('Vertical text exceeds the available block width.');
+                $flushColumns();
                 $this->newPage();
+                $blockStart = count($this->ops);
+                $blockText = '';
                 $top = $this->y;
                 $used = 0.0;
                 $extent = 0.0;
@@ -3184,6 +3211,7 @@ final class HtmlPdf
             $cx = $s['writingMode'] === 'vertical-rl' ? $x + $width - $used - $column / 2 : $x + $used + $column / 2;
             $free = max(0.0, $inlineSize - $line['w']);
             $cy = $top + match ($s['align']) { 'center' => $free / 2, 'right' => $free, default => 0.0 };
+            $blockText .= $line['text'] . $line['separator'];
             $this->ops[] = $this->actualTextStart($line['text']);
             foreach ($line['items'] as $item) {
                 if (isset($item['shaped'])) {
@@ -3215,6 +3243,7 @@ final class HtmlPdf
             $used += $column;
             $extent = max($extent, $cy - $top);
         }
+        $flushColumns();
         $this->extent = max($this->extent, $x + $used);
         $this->y = $top + $extent;
     }

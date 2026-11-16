@@ -2,6 +2,9 @@ name: PHP and native verification
 on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   verify:
     strategy:
@@ -16,6 +19,7 @@ jobs:
           - { os: macos-15, php: '8.4' }
           - { os: macos-15-intel, php: '8.4' }
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
@@ -42,7 +46,7 @@ jobs:
           path: |
             tests/fonts
             tests/unicode
-          key: unicode-fonts-${{ hashFiles('tests/fonts/manifest.json', 'tests/unicode/manifest.json') }}
+          key: unicode-fonts-${{ hashFiles('assets/font-packs.json', 'tests/unicode/manifest.json') }}
       - run: python native/build-dependencies.py
       - name: Build and verify
         shell: bash
@@ -64,6 +68,10 @@ jobs:
           php tests/benchmark.php > tests/performance.json
           python native/package.py
           php bin/tinypdf-check.php "$(find dist -path '*/bin/tinypdf-text' -type f | head -1)"
+      - name: Diagnose native crashes
+        if: failure() && runner.os == 'macOS'
+        run: |
+          python tests/diagnose_crash.py
       - uses: actions/upload-artifact@v4
         if: matrix.php == '8.4'
         with:

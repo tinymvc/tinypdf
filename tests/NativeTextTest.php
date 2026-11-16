@@ -109,14 +109,14 @@ test('Failures are explicit for missing helpers fonts malformed text and invalid
 });
 
 test('Subsetting survives repeated output and newly added glyphs', function () {
-    $pdf = (new HtmlPdf())->addFont('bn', testFont('bengali'))->setFallbackFonts(['bn'])->addHtml('<p>প্রাক্তন</p>');
+    $pdf = (new HtmlPdf())->addFont('bn', testFont('bengali'))->setFallbackFonts(['bn'])->addHtml('<p>নির্ভুল</p>');
     $first = getDecompressedStreams($pdf->output());
     same($first, getDecompressedStreams($pdf->output()));
-    $pdf->addHtml('<p>শিক্ষার্থীদের পুনর্মিলনী ২০২৪</p>');
+    $pdf->addHtml('<p>বহুভাষিক নথি ২০২৬</p>');
     $second = $pdf->output();
     check(str_contains($second, '/Count 2'), 'New pages must be retained');
-    check(str_contains(logicalText(getDecompressedStreams($second)), 'প্রাক্তন'), 'Existing glyphs and source mappings must survive');
-    check(str_contains(logicalText(getDecompressedStreams($second)), 'শিক্ষার্থীদের পুনর্মিলনী ২০২৪'), 'New glyphs must be added to the next subset: ' . logicalText(getDecompressedStreams($second)));
+    check(str_contains(logicalText(getDecompressedStreams($second)), 'নির্ভুল'), 'Existing glyphs and source mappings must survive');
+    check(str_contains(logicalText(getDecompressedStreams($second)), 'বহুভাষিক নথি ২০২৬'), 'New glyphs must be added to the next subset: ' . logicalText(getDecompressedStreams($second)));
 });
 
 test('Vertical Japanese and color emoji retain logical Unicode', function () {

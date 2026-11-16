@@ -14,6 +14,7 @@ final class NativeHelper
     private array $pipes = [];
     private int $sequence = 0;
     private string $diagnostics = '';
+    private string $operation = '';
     private bool $failed = false;
     private ?array $capabilities = null;
 
@@ -47,13 +48,17 @@ final class NativeHelper
         if (!is_file($path) || (PHP_OS_FAMILY !== 'Windows' && !is_executable($path))) {
             throw new \RuntimeException("TinyPDF text helper is missing or not executable: $path. Build native/ or set TextOptions::helperPath.");
         }
-        $this->process = @proc_open([$path], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $this->pipes,
-            null, null, ['bypass_shell' => true, 'blocking_pipes' => false]);
-        if (!is_resource($this->process)) {
-            throw new \RuntimeException('Cannot launch the TinyPDF text helper.');
-        }
-        foreach ($this->pipes as $pipe) {
-            stream_set_blocking($pipe, false);
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->startSocket($path);
+        } else {
+            $this->process = @proc_open([$path], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $this->pipes,
+                null, null, ['bypass_shell' => true, 'blocking_pipes' => false]);
+            if (!is_resource($this->process)) {
+                throw new \RuntimeException('Cannot launch the TinyPDF text helper.');
+            }
+            foreach ($this->pipes as $pipe) {
+                stream_set_blocking($pipe, false);
+            }
         }
         $this->capabilities = $this->request('capabilities');
         foreach (['layout', 'bidi', 'graphemes', 'fallback', 'subset', 'variations', 'vertical', 'color'] as $required) {
@@ -63,9 +68,38 @@ final class NativeHelper
         }
     }
 
+    private function startSocket(string $path): void
+    {
+        $listener = @stream_socket_server('tcp://127.0.0.1:0', $code, $message);
+        if ($listener === false) throw new \RuntimeException("Cannot open local text transport: $message");
+        $diagnostics = tmpfile();
+        if ($diagnostics === false) {
+            fclose($listener);
+            throw new \RuntimeException('Cannot create text helper diagnostic stream.');
+        }
+        $token = bin2hex(random_bytes(16));
+        $null = PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null';
+        $this->process = @proc_open([$path, '--connect', stream_socket_get_name($listener, false), $token],
+            [0 => ['file', $null, 'r'], 1 => ['file', $null, 'w'], 2 => $diagnostics], $unused,
+            null, null, ['bypass_shell' => true]);
+        $this->pipes[2] = $diagnostics;
+        try {
+            if (!is_resource($this->process)) $this->fail('Cannot launch the TinyPDF text helper');
+            stream_set_blocking($listener, false);
+            $deadline = microtime(true) + $this->options->helperTimeout;
+            while (($socket = @stream_socket_accept($listener, 0)) === false) $this->poll($deadline, true);
+            stream_set_blocking($socket, false);
+            $this->pipes[0] = $this->pipes[1] = $socket;
+            if (!hash_equals($token, $this->read(32, $deadline))) $this->fail('Text helper authentication failed');
+        } finally {
+            fclose($listener);
+        }
+    }
+
     public function request(string $operation, array $arguments = []): mixed
     {
         $this->start();
+        $this->operation = $operation;
         $id = ++$this->sequence;
         $body = json_encode(['protocol' => 1, 'id' => $id, 'op' => $operation] + $arguments,
             JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
@@ -121,7 +155,12 @@ final class NativeHelper
 
     private function poll(float $deadline, bool $wait): void
     {
-        $this->diagnostics = substr($this->diagnostics . (stream_get_contents($this->pipes[2]) ?: ''), -8192);
+        if (stream_get_meta_data($this->pipes[2])['seekable']) {
+            fseek($this->pipes[2], max(0, fstat($this->pipes[2])['size'] - 8192));
+            $this->diagnostics = stream_get_contents($this->pipes[2]) ?: '';
+        } else {
+            $this->diagnostics = substr($this->diagnostics . (stream_get_contents($this->pipes[2]) ?: ''), -8192);
+        }
         if (microtime(true) >= $deadline) {
             $this->fail('Text helper timed out');
         }
@@ -136,6 +175,7 @@ final class NativeHelper
     private function fail(string $message): never
     {
         $diagnostics = trim($this->diagnostics);
+        if ($this->operation !== '') $message .= ' during ' . $this->operation;
         $this->failed = true;
         $this->close();
         throw new \RuntimeException($message . ($diagnostics === '' ? '.' : ": $diagnostics"));

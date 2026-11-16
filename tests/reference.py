@@ -59,7 +59,7 @@ def font_path(pack):
  return entries[0]
 
 def verify_fonts():
- manifest=json.loads((ROOT/'tests/fonts/manifest.json').read_text())
+ manifest=json.loads((ROOT/'assets/font-packs.json').read_text())
  for entry in manifest['files']:
   path=ROOT/entry['file']
   assert path.is_file(),f'Missing required fixture {path}'

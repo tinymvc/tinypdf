@@ -1,3 +1,4 @@
+#include "process_io.h"
 #include "vendor/json.hpp"
 #include <hb.h>
 #include <hb-ot.h>
@@ -602,22 +603,19 @@ public:
 // Font embedding and color rasterization are implemented below.
 #include "output.h"
 
-int main() {
-#ifdef _WIN32
-    _setmode(_fileno(stdin), _O_BINARY);
-    _setmode(_fileno(stdout), _O_BINARY);
-#endif
+int main(int argc, char **argv) {
     try {
+        ProcessIo io(argc, argv);
         Engine engine;
         while (true) {
             unsigned char header[4];
-            std::cin.read(reinterpret_cast<char *>(header), 4);
-            if (std::cin.gcount() == 0 && std::cin.eof()) break;
-            require(std::cin.gcount() == 4, "Truncated request header");
+            auto received = io.read(reinterpret_cast<char *>(header), 4);
+            if (received == 0) break;
+            require(received == 4, "Truncated request header");
             uint32_t length = uint32_t(header[0]) << 24 | uint32_t(header[1]) << 16 | uint32_t(header[2]) << 8 | header[3];
             require(length > 0 && length <= MAX_MESSAGE, "Invalid request size");
             std::string payload(length, '\0');
-            require(bool(std::cin.read(payload.data(), length)), "Truncated request");
+            require(io.read(payload.data(), length) == length, "Truncated request");
             Json response, id = nullptr;
             try {
                 auto request = Json::parse(payload);
@@ -632,10 +630,7 @@ int main() {
             uint32_t size = body.size();
             unsigned char prefix[] = {static_cast<unsigned char>(size >> 24), static_cast<unsigned char>(size >> 16),
                 static_cast<unsigned char>(size >> 8), static_cast<unsigned char>(size)};
-            std::cout.write(reinterpret_cast<char *>(prefix), 4);
-            std::cout.write(body.data(), body.size());
-            std::cout.flush();
-            if (!std::cout) break;
+            if (!io.write(reinterpret_cast<char *>(prefix), 4) || !io.write(body.data(), body.size())) break;
         }
     } catch (const std::exception &error) {
         std::cerr << "tinypdf-text: " << error.what() << '\n';

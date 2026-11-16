@@ -1,6 +1,6 @@
 # TinyPDF native helper 1.1.0
 
-The helper is required for every document. PHP launches it once using an argument-array `proc_open()` call and retains fonts and instances until the document is destroyed. The helper never downloads fonts or accesses the network.
+The helper is required for every document. PHP launches it once using an argument-array `proc_open()` call and retains fonts and instances until the document is destroyed. The helper never downloads fonts. Windows uses an authenticated loopback socket because PHP process pipes cannot enforce nonblocking reads; Linux/macOS use stdin/stdout.
 
 ## Dependencies and build
 
@@ -30,24 +30,6 @@ Cairo, librsvg, libpng, Brotli and their platform dependencies must already be i
 `cmake --install native/build --prefix /desired/location` installs the executable. For a relocatable bundle, run `python3 native/package.py`, then run the diagnostic against the resulting `dist/.../bin/tinypdf-text`. Copy **both** `bin/` and `lib/` when installing a macOS/Linux bundle. Windows DLLs live alongside the executable.
 
 Linux release builds target glibc 2.39 (Ubuntu 24.04), x64 and ARM64. Other libc environments, including musl, need a source build. The CI matrix also defines macOS Intel/Apple Silicon and Windows x64 jobs. The CI jobs build and test the helper on each target before creating an archive.
-
-## Protocol 1
-
-Each request/response is a four-byte unsigned big-endian byte length followed by UTF-8 JSON. Maximum frame size: 64 MiB. Maximum paragraph: 1 MiB. stdout carries frames exclusively; stderr carries diagnostics. Requests contain `protocol:1`, a monotonically increasing integer `id`, and `op`. Responses echo protocol/id and contain `result` or `error:{code,message}`.
-
-Operations:
-
-- `capabilities`: versions, Unicode version, required operations and frame limit.
-- `font`: local path, zero-based face index and axis coordinates; returns immutable font-instance ID and native metadata.
-- `analyze`: UTF-8/UTF-16/character offset maps, grapheme and line boundaries, bidi levels and visual map.
-- `layout`: logical paragraph, contiguous styled source ranges, font stacks, language, direction and available inline width; returns line runs with glyph IDs, byte clusters, advances, offsets, ink bounds and original Unicode.
-- `color`: font instance, shaped glyph ID, point size, DPI and foreground; returns transparent pixel planes and placement bounds.
-- `subset`: font instance and document CID/glyph pairs; returns a static subset, widths and original-to-subset mapping.
-- `batch`: up to 4096 non-nested operations.
-
-The PHP client checks capabilities, IDs, framing and deadlines, drains stderr, and terminates failed helpers. An unavailable process API, missing/incompatible executable, missing fonts, invalid UTF-8, unsupported font data or native failure causes an exception. There is no legacy shaping fallback.
-
-ICU still supplies all versioned Unicode properties. FriBidi supplies bidi resolution because the tested ICU 78.3 resolver fails nested overrides/isolate cases; the combined pipeline passes the complete pinned Unicode 17 test files. HarfBuzz handles glyph mirroring and mark positioning after bidi ordering; Unicode source text is never reversed or converted to presentation forms.
 
 ## Distribution
 

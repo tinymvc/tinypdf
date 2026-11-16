@@ -1,10 +1,14 @@
-name: Windows native candidate
+name: Windows verification
 on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   verify:
     runs-on: windows-2025
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
@@ -12,6 +16,10 @@ jobs:
           php-version: '8.4'
           extensions: dom, mbstring, json, zlib, ctype, gd
           coverage: none
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r tests/requirements.txt
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -23,7 +31,6 @@ jobs:
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-python
-            mingw-w64-ucrt-x86_64-python-pip
             mingw-w64-ucrt-x86_64-meson
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-cairo
@@ -31,7 +38,8 @@ jobs:
             mingw-w64-ucrt-x86_64-libpng
             mingw-w64-ucrt-x86_64-librsvg
             mingw-w64-ucrt-x86_64-brotli
-      - name: Build pinned native engines and run integration
+            mingw-w64-ucrt-x86_64-poppler
+      - name: Build native helper
         shell: msys2 {0}
         run: |
           python native/build-dependencies.py
@@ -39,14 +47,37 @@ jobs:
           export PATH="$PWD/native/prefix/bin:$PATH"
           cmake -S native -B native/build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build native/build --target tinypdf-text tinypdf-test-helper --parallel
+      - name: Prepare fonts and fixtures
+        shell: msys2 {0}
+        run: |
+          composer validate --strict
           composer install --no-interaction --prefer-dist
           php bin/install-fonts.php --tests --unicode
-          python -m pip install --break-system-packages 'fonttools[woff]==4.61.1'
-          python tests/prepare_formats.py
+          "$(cygpath -u "$pythonLocation")/python.exe" tests/prepare_formats.py
+      - name: Verify PHP integration and failure deadlines
+        timeout-minutes: 5
+        shell: msys2 {0}
+        run: |
+          export PATH="$PWD/native/prefix/bin:$PATH"
           php bin/tinypdf-check.php
           composer test
+      - name: Verify shaping and Unicode
+        shell: msys2 {0}
+        run: |
+          export PATH="$PWD/native/prefix/bin:$PATH"
           python tests/reference.py
           python tests/unicode_conformance.py
+      - name: Verify rendering and extraction
+        shell: msys2 {0}
+        run: |
+          export PATH="$PWD/native/prefix/bin:$PATH"
+          "$(cygpath -u "$pythonLocation")/python.exe" tests/rendering.py
+          php tests/benchmark.php > tests/performance.json
+      - name: Package and verify installed helper
+        shell: msys2 {0}
+        run: |
+          export PKG_CONFIG_PATH="$PWD/native/prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          export PATH="$PWD/native/prefix/bin:$PATH"
           python native/package.py
           php bin/tinypdf-check.php "$(find dist -path '*/bin/tinypdf-text.exe' -type f | head -1)"
       - uses: actions/upload-artifact@v4
@@ -56,4 +87,6 @@ jobs:
             dist/*.zip
             dist/*.sha256
             tests/unicode/results.json
+            tests/performance.json
+            output/pdf/
           if-no-files-found: error

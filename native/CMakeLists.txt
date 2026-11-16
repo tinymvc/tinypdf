@@ -13,3 +13,8 @@ else()
 endif()
 install(TARGETS tinypdf-text RUNTIME DESTINATION bin)
 add_executable(tinypdf-test-helper EXCLUDE_FROM_ALL ../tests/helper_fault.cpp)
+
+if(WIN32)
+  target_link_libraries(tinypdf-text PRIVATE ws2_32)
+  target_link_libraries(tinypdf-test-helper PRIVATE ws2_32)
+endif()

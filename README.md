@@ -105,9 +105,9 @@ This writes `fonts/<pack>/` inside the package. Register the installed paths exp
 
 TTF, OpenType CFF/CFF2, TTC face selection, WOFF/WOFF2 and variable instances are supported by the native font backend. TrueType subsets use explicit CID-to-GID maps. Cubic outlines are normalized to static CID-keyed CFF. Fonts with embedding/subsetting restrictions fail explicitly.
 
-HarfBuzz performs OpenType shaping; ICU supplies Unicode 17 properties, graphemes and locale-sensitive line breaks; FriBidi resolves paragraph and line bidi. The change from ICU bidi to FriBidi is intentional: Unicode conformance tests exposed ICU override/isolate failures. Original text stays in logical order; only positioned glyphs are reordered for painting.
+HarfBuzz performs OpenType shaping; ICU supplies Unicode 17 properties, graphemes and locale-sensitive line breaks; FriBidi resolves paragraph and line bidi. Original text stays in logical order; only positioned glyphs are reordered for painting.
 
-Supported typography includes inherited `lang`, `dir="ltr|rtl|auto"`, `bdi`, `bdo`, `unicode-bidi`, OpenType features, numeric weights, variation settings, Unicode wrapping, safe cluster spacing, `writing-mode:horizontal-tb|vertical-rl|vertical-lr`, and `text-orientation:mixed|upright|sideways`. Supply a height for a vertical text box to define its inline extent. PDF `ToUnicode` and `ActualText` preserve logical source sequences; reader extraction behavior still needs viewer-specific testing.
+Supported typography includes inherited `lang`, `dir="ltr|rtl|auto"`, `bdi`, `bdo`, `unicode-bidi`, OpenType features, numeric weights, variation settings, Unicode wrapping, safe cluster spacing, `writing-mode:horizontal-tb|vertical-rl|vertical-lr`, and `text-orientation:mixed|upright|sideways`. Supply a height for a vertical text box to define its inline extent. PDF `ToUnicode` and `ActualText` preserve logical source sequences; regression tests verify extraction in MuPDF, PDFium and Poppler.
 
 COLR/CPAL, CBDT/CBLC, sbix and OpenType-SVG glyphs use transparent 600-DPI images by default, with invisible selectable companion text. Ordinary text stays vector. Rasterizing a bitmap font at 600 DPI does not invent detail beyond its original bitmap resolution.
 
@@ -181,16 +181,21 @@ Bound document size, image dimensions, and execution/memory limits in the applic
 
 ## Validation
 
+With the helper built and Poppler on `PATH`:
+
 ```bash
 composer install
 composer validate --strict
+python -m pip install -r tests/requirements.txt
+php bin/install-fonts.php --tests --unicode
+python tests/prepare_formats.py
 composer test
-php tests/run.php BanglaText
-php examples/invoice.php invoice.pdf
+python tests/reference.py
+python tests/unicode_conformance.py
+python tests/rendering.py
 ```
 
-All language fixtures are pinned and required; tests do not silently skip absent fonts. Install them with `php bin/install-fonts.php --tests --unicode`. Python checks use `tests/requirements.txt`; run `tests/prepare_formats.py` before the PHP suite, then `tests/reference.py`, `tests/unicode_conformance.py` and `tests/rendering.py`. The latter requires Poppler on `PATH`.
-
+All language fixtures are pinned and required; tests do not silently skip missing fonts. CI covers PHP 8.2–8.5, Linux x64/ARM64, macOS Intel/Apple Silicon, and Windows x64.
 
 For visual validation, render your own multilingual/multipage templates in the readers your users rely on. The tests compare shaping with direct HarfBuzz output and exercise Unicode conformance and PDF rendering; they do not establish universal browser fidelity or certify every font and reader combination.
 

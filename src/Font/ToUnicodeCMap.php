@@ -17,7 +17,7 @@ final class ToUnicodeCMap
     /**
      * @param array<int, int|string> $glyphToUnicode Map of glyphId => Unicode codepoint (or UTF-16BE hex string)
      */
-    public static function build(array $glyphToUnicode): string
+    public static function build(array $glyphToUnicode, int $codeBytes = 2): string
     {
         ksort($glyphToUnicode);
 
@@ -28,7 +28,7 @@ final class ToUnicodeCMap
             . "/CMapName /Custom-ToUnicode def\n"
             . "/CMapType 2 def\n"
             . "1 begincodespacerange\n"
-            . "<0000> <FFFF>\n"
+            . ($codeBytes === 1 ? "<00> <FF>\n" : "<0000> <FFFF>\n")
             . "endcodespacerange\n";
 
         // Group into chunks of at most 100 entries per beginbfchar
@@ -36,7 +36,7 @@ final class ToUnicodeCMap
         foreach ($chunks as $chunk) {
             $stream .= count($chunk) . " beginbfchar\n";
             foreach ($chunk as $gid => $uni) {
-                $gidHex = sprintf('%04X', $gid);
+                $gidHex = sprintf($codeBytes === 1 ? '%02X' : '%04X', $gid);
                 if (is_int($uni)) {
                     if ($uni > 0xFFFF) {
                         $high = 0xD800 + (($uni - 0x10000) >> 10);

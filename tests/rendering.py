@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise three PDF engines, embedded fonts and reviewed raster fixtures.
-
-Reader extraction discrepancies are recorded explicitly, not treated as proof
-that the generated source mappings are missing or that every reader is certified.
-"""
+"""Validate text recovery, embedded outlines and three independent PDF rasterizers."""
 import io
 import json
 import os
@@ -17,7 +13,7 @@ import pymupdf
 import pypdfium2
 from fontTools.ttLib import TTFont
 from pypdf import PdfReader
-from pypdf.generic import ContentStream
+from extraction import canonical, verify as verify_extraction
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT = ROOT / 'output/pdf'
@@ -32,22 +28,6 @@ def run(args):
     return result.stdout
 
 
-def logical_text(reader):
-    lines = []
-    for page in reader.pages:
-        depth = 0
-        for operands, operator in ContentStream(page.get_contents(), reader).operations:
-            if operator == b'q':
-                depth += 1
-            elif operator == b'Q':
-                depth -= 1
-                assert depth >= 0, 'Unbalanced graphics state'
-            elif operator == b'BDC' and '/ActualText' in operands[-1]:
-                lines.append(str(operands[-1]['/ActualText']))
-        assert depth == 0, 'Unbalanced graphics state'
-    return '\n'.join(lines)
-
-
 def inspect_fonts(reader):
     checked = set()
     for page in reader.pages:
@@ -57,6 +37,9 @@ def inspect_fonts(reader):
             checked.add(reference.idnum)
             font = reference.get_object()
             assert '/ToUnicode' in font
+            if font['/Subtype'] == '/Type3':
+                assert font['/CharProcs'] and font['/Resources']['/Font']
+                continue
             descendant = font['/DescendantFonts'][0].get_object()
             descriptor = descendant['/FontDescriptor']
             if '/FontFile2' in descriptor:
@@ -91,7 +74,6 @@ def main():
         path = OUT / f'tinypdf-1.1.0-{name}.pdf'
         run(['php', ROOT / 'tests' / script, path])
         reader = PdfReader(path, strict=True)
-        logical = logical_text(reader)
         fonts = inspect_fonts(reader)
         mupdf = pymupdf.open(path)
         pdfium = pypdfium2.PdfDocument(path)
@@ -100,16 +82,10 @@ def main():
         pdfium_text = '\n'.join(page.get_textpage().get_text_bounded() for page in pdfium)
         poppler_text = run([extractor, '-enc', 'UTF-8', path, '-']).decode()
         if name == 'multilingual':
-            assert TITLE in logical
             assert TITLE in mupdf_text and TITLE in pdfium_text and TITLE in poppler_text
-            assert EMOJI in logical and EMOJI in mupdf_text
-            assert 'اردو زبان میں خوش آمدید' in pdfium_text
+            assert EMOJI in mupdf_text and EMOJI in pdfium_text and EMOJI in poppler_text
+            assert 'اردو زبان میں خوش آمدید' in mupdf_text and 'اردو زبان میں خوش آمدید' in pdfium_text
         document = {'pages': len(mupdf), 'embedded_fonts': fonts, 'comparisons': []}
-        if name == 'multilingual':
-            document['reader_observations'] = {
-                'pdfium_exact_emoji_sequence': EMOJI in pdfium_text,
-                'mupdf_exact_urdu_sequence': 'اردو زبان میں خوش آمدید' in mupdf_text,
-            }
         with tempfile.TemporaryDirectory() as directory:
             prefix = pathlib.Path(directory) / 'poppler'
             run([poppler, '-r', '72', '-png', path, prefix])
@@ -135,6 +111,7 @@ def main():
         mupdf.close()
         pdfium.close()
         report['documents'][name] = document
+    report['extraction'] = verify_extraction(OUT / 'tinypdf-1.1.0-extraction.pdf')
     (OUT / 'rendering-results.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
     print(json.dumps(report, ensure_ascii=False, indent=2))
 

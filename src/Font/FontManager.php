@@ -155,7 +155,8 @@ final class FontManager
             $this->cache[$key] = $result;
         }
         $lines = [];
-        foreach ($this->cache[$key]['lines'] as $line) {
+        $nativeLines = $this->cache[$key]['lines'];
+        foreach ($nativeLines as $index => $line) {
             $output = [];
             foreach ($line['items'] as $run) {
                 $item = $items[$run['item']];
@@ -176,6 +177,7 @@ final class FontManager
             }
             $lines[] = ['items' => $output, 'w' => $line['width'], 'hard' => $line['hard'],
                 'text' => preg_replace('/[\x{202A}-\x{202E}\x{2066}-\x{2069}]/u', '', $logical),
+                'separator' => substr($text, $line['end'], ($nativeLines[$index + 1]['start'] ?? strlen($text)) - $line['end']),
                 'direction' => $line['direction']];
         }
         return $lines;

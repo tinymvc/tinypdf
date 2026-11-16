@@ -15,7 +15,7 @@ if (in_array('--help', $arguments, true)) {
     exit(0);
 }
 try {
-    $manifest = json_decode(file_get_contents($root . '/tests/fonts/manifest.json'), true, 512, JSON_THROW_ON_ERROR);
+    $manifest = json_decode(file_get_contents($root . '/assets/font-packs.json'), true, 512, JSON_THROW_ON_ERROR);
     $known = array_unique(array_column($manifest['files'], 'pack'));
     foreach ($packs as $pack) {
         if (!in_array($pack, $known, true)) throw new RuntimeException("Unknown font pack: $pack. Available: " . implode(', ', $known));

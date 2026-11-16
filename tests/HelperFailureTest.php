@@ -20,3 +20,16 @@ foreach (['crash', 'timeout', 'oversize', 'truncated', 'protocol', 'id', 'capabi
         }
     });
 }
+
+
+test('Authenticated socket transport exchanges large framed responses', function () {
+    $helper = new NativeHelper();
+    $start = new ReflectionMethod($helper, 'startSocket');
+    $start->invoke($helper, dirname(__DIR__) . '/native/build/tinypdf-text' . (PHP_OS_FAMILY === 'Windows' ? '.exe' : ''));
+    $capabilities = $helper->request('capabilities');
+    same(1, $capabilities['protocol']);
+    $text = str_repeat('বাংলা 😀 ', 1000);
+    $result = $helper->request('analyze', ['text' => $text]);
+    same(mb_strlen($text, 'UTF-8'), end($result['utf16ToCharacter']));
+    $helper->close();
+});
