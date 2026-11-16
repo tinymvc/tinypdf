@@ -44,3 +44,18 @@ test('CBDT bitmap emoji can be shaped rasterized and subsetted', function () {
     check(str_contains($pdf, '/SMask'), 'Bitmap emoji require transparent image resources');
     same('😀 👨‍👩‍👧‍👦 🇧🇩 👍🏽', logicalText(getDecompressedStreams($pdf)));
 });
+
+
+test('Unicode font paths work on every platform', function () {
+    $base = tempnam(sys_get_temp_dir(), 'tinypdf-font-');
+    $path = $base . '-বাংলা-日本語.ttf';
+    rename($base, $path);
+    try {
+        copy(testFont('bengali'), $path);
+        $pdf = (new HtmlPdf())->addFont('unicode-path', $path)
+            ->addHtml('<p style="font-family:unicode-path">বাংলা ভাষা</p>')->output();
+        same('বাংলা ভাষা', logicalText(getDecompressedStreams($pdf)));
+    } finally {
+        unlink($path);
+    }
+});

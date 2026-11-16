@@ -32,7 +32,7 @@ for name in ['brotli','freetype','icu','fribidi','harfbuzz']:
  source=next(x for x in folder.iterdir() if x.is_dir() and x.name!='build')
  if name=='brotli':
   build=folder/'build'
-  run(['cmake','-S',source,'-B',build,'-G','Ninja','-DCMAKE_BUILD_TYPE=Release','-DBUILD_SHARED_LIBS=ON','-DBROTLI_BUILD_TOOLS=OFF','-DBROTLI_DISABLE_TESTS=ON','-DCMAKE_INSTALL_LIBDIR=lib','-DCMAKE_INSTALL_PREFIX='+str(PREFIX)],ROOT)
+  run(['cmake','-S',source,'-B',build,'-G','Ninja','-DCMAKE_BUILD_TYPE=Release','-DBUILD_SHARED_LIBS=ON','-DBROTLI_BUILD_TOOLS=OFF','-DBROTLI_DISABLE_TESTS=ON','-DCMAKE_INSTALL_LIBDIR=lib','-DCMAKE_INSTALL_PREFIX='+str(PREFIX),'-DCMAKE_INSTALL_NAME_DIR='+str(PREFIX/'lib')],ROOT)
   run(['cmake','--build',build,'--parallel',str(min(os.cpu_count() or 2,8))],ROOT)
   run(['cmake','--install',build],ROOT)
  elif name=='icu':
@@ -43,7 +43,7 @@ for name in ['brotli','freetype','icu','fribidi','harfbuzz']:
  else:
   build=folder/'build'
   args=['meson','setup',str(build),str(source),'--prefix='+str(PREFIX),'--libdir=lib','--buildtype=release','-Ddefault_library=shared']
-  if build.exists():args+=['--reconfigure']
+  if build.exists():args+=['--reconfigure','--clearcache']
   if name=='harfbuzz':args+=['-Dtests=disabled','-Ddocs=disabled','-Dutilities=enabled','-Dcairo=enabled','-Dfreetype=enabled','-Dpng=enabled','-Dzlib=enabled','-Dglib=enabled','-Dgobject=enabled','-Dicu=disabled','-Dgraphite2=disabled','-Dcoretext=auto','-Dgdi=auto','-Ddirectwrite=auto','-Draster=disabled','-Dvector=disabled','-Dgpu=disabled']
   elif name=='freetype':args+=['-Dbrotli=enabled','-Dzlib=enabled','-Dpng=enabled','-Dharfbuzz=disabled','-Dbzip2=disabled','-Dtests=disabled']
   else:args+=['-Ddocs=false','-Dtests=false']

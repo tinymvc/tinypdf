@@ -106,6 +106,7 @@ static std::vector<int> boundaries(const Text &text, UBreakIteratorType type, co
 
 struct Font {
     FT_Face ft = nullptr;
+    hb_blob_t *source = nullptr;
     hb_face_t *face = nullptr;
     hb_font_t *font = nullptr;
     std::vector<hb_variation_t> variations;
@@ -117,14 +118,12 @@ struct Font {
         if (font) hb_font_destroy(font);
         if (face) hb_face_destroy(face);
         if (ft) FT_Done_Face(ft);
+        if (source) hb_blob_destroy(source);
     }
 };
 
-static hb_face_t *loadFontFace(const std::string &path, unsigned index, FT_Face ft) {
-    std::unique_ptr<hb_blob_t, decltype(&hb_blob_destroy)> blob(
-        hb_blob_create_from_file_or_fail(path.c_str()), hb_blob_destroy);
-    require(bool(blob), "Cannot read font data");
-    auto face = hb_face_create(blob.get(), index);
+static hb_face_t *loadFontFace(hb_blob_t *source, unsigned index, FT_Face ft) {
+    auto face = hb_face_create(source, index);
     if (hb_face_get_glyph_count(face)) return face;
     hb_face_destroy(face);
 
@@ -186,9 +185,16 @@ class Engine {
         require(path.find('\0') == std::string::npos, "Invalid font path");
         int index = request.value("faceIndex", 0);
         require(index >= 0, "Invalid font face index");
-        require(!FT_New_Face(library, path.c_str(), index, &font->ft), "Cannot load font: " + path);
+        // HarfBuzz opens UTF-8 paths with the wide Windows API. Share that
+        // mapping with FreeType instead of passing UTF-8 to CreateFileA.
+        font->source = hb_blob_create_from_file_or_fail(path.c_str());
+        require(font->source != nullptr, "Cannot read font: " + path);
+        unsigned length = 0;
+        auto bytes = hb_blob_get_data(font->source, &length);
+        require(!FT_New_Memory_Face(library, reinterpret_cast<const FT_Byte *>(bytes), length, index, &font->ft),
+                "Cannot load font: " + path);
         require(index < font->ft->num_faces && FT_IS_SFNT(font->ft), "Unsupported font face");
-        font->face = loadFontFace(path, index, font->ft);
+        font->face = loadFontFace(font->source, index, font->ft);
         font->upem = hb_face_get_upem(font->face);
         require(hb_face_get_glyph_count(font->face) > 0, "Font has no glyphs");
         auto os2 = static_cast<TT_OS2 *>(FT_Get_Sfnt_Table(font->ft, ft_sfnt_os2));

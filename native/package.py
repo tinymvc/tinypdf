@@ -24,6 +24,44 @@ def dependencies(path):
   resolved=shutil.which(dll) or next((str(pathlib.Path(p)/dll) for p in os.environ['PATH'].split(os.pathsep) if (pathlib.Path(p)/dll).is_file()),None)
   if resolved and 'windows/system32' not in resolved.replace('\\','/').lower():found.append(resolved)
  return found
+system_libraries={}
+library_owners={}
+package_roots={}
+def package_owned_library(path):
+ resolved=path.resolve()
+ if resolved.is_relative_to(ROOT/'prefix'):return path
+ if str(resolved) in system_libraries:return system_libraries[str(resolved)]
+ query=subprocess.run(['dpkg-query','-S',str(resolved)],text=True,capture_output=True)
+ if re.search(r'^[a-z0-9][a-z0-9+.-]*(?::[a-z0-9]+)?: ',query.stdout,re.MULTILINE):return path
+ dynamic=output(['readelf','-d',str(path)])
+ match=re.search(r'\(SONAME\).*?\[([^]]+)\]',dynamic)
+ soname=match[1] if match else path.name
+ query=subprocess.run(['dpkg-query','-S','*/'+soname],text=True,capture_output=True)
+ packages=[]
+ for line in query.stdout.splitlines():
+  owner=re.match(r'^([a-z0-9][a-z0-9+.-]*(?::[a-z0-9]+)?): ',line)
+  if owner:packages.append(owner[1])
+ for package in packages:
+  listed=output(['dpkg-query','-L',package]).splitlines()
+  candidates=[pathlib.Path(name) for name in listed if pathlib.Path(name).name.startswith(soname+'.') or pathlib.Path(name).name==soname]
+  available=next((candidate for candidate in candidates if candidate.is_file() and not candidate.is_symlink()),None)
+  if available is None:
+   # Some PHP setup tools replace system shared objects outside dpkg. Recover
+   # the distribution's matching runtime instead of shipping unowned binaries.
+   staging=ROOT/'build/system-libraries'/package.replace(':','-');staging.mkdir(parents=True,exist_ok=True)
+   version=output(['dpkg-query','-W','-f=${Version}',package]).strip()
+   subprocess.run(['apt-get','download',package+'='+version],cwd=staging,check=True)
+   archive=next(staging.glob('*.deb'));extracted=staging/'root'
+   subprocess.run(['dpkg-deb','-x',str(archive),str(extracted)],check=True)
+   available=next((extracted/str(candidate).lstrip('/') for candidate in candidates
+                   if (extracted/str(candidate).lstrip('/')).is_file() and not (extracted/str(candidate).lstrip('/')).is_symlink()),None)
+   package_roots[package]=extracted
+  if available:
+   print('Using package-owned runtime:',available,flush=True)
+   system_libraries[str(resolved)]=available
+   library_owners[str(available.resolve())]=package
+   return available
+ raise SystemExit(f'Cannot identify a distribution-owned runtime for {path} (resolved to {resolved})')
 baseline={'libc.so.6','libm.so.6','libpthread.so.0','libdl.so.2','librt.so.1','libresolv.so.2','libutil.so.1'}
 queue=[(args.binary.resolve(),helper)];copied={};edges=[];sources={}
 while queue:
@@ -38,8 +76,10 @@ while queue:
   path=pathlib.Path(dependency)
   if path.resolve()==original.resolve():continue
   if not path.is_file():raise SystemExit(f'Unresolved dependency: {dependency}')
+  requested_name=path.name
+  if system=='linux':path=package_owned_library(path)
   source=str(path.resolve())
-  filename=sources.get(source,path.name)
+  filename=sources.get(source,requested_name)
   if filename in copied and copied[filename]!=source:
    if system!='darwin':raise SystemExit(f'Conflicting runtime libraries: {filename}')
    filename=hashlib.sha256(source.encode()).hexdigest()[:12]+'-'+path.name
@@ -120,13 +160,18 @@ for filename,library in copied.items():
    match=re.search(r'provided by: (\S+)',result.stdout)
    if match:notices=copy_notices(pathlib.Path('/opt/local/share/doc')/match[1],match[1])
  elif system=='linux':
-  result=subprocess.run(['dpkg-query','-S',library],text=True,capture_output=True)
-  if result.returncode:
-   # usr-merged installations may register /lib while ldd resolves /usr/lib.
-   result=subprocess.run(['dpkg-query','-S','*/'+path.name],text=True,capture_output=True)
-  for line in result.stdout.splitlines():
-   package=line.split(': ')[0].split(':')[0]
-   notices+=copy_notices(pathlib.Path('/usr/share/doc')/package,package)
+  if library in library_owners:
+   packages=[library_owners[library]]
+  else:
+   result=subprocess.run(['dpkg-query','-S',library],text=True,capture_output=True)
+   if result.returncode:result=subprocess.run(['dpkg-query','-S','*/'+path.name],text=True,capture_output=True)
+   packages=[line.split(': ')[0] for line in result.stdout.splitlines()]
+  for package in packages:
+   root=package_roots.get(package,pathlib.Path('/'))
+   name=package.split(':')[0]
+   found=copy_notices(root/'usr/share/doc'/name,name)
+   if not found and root!=pathlib.Path('/'):found=copy_notices(pathlib.Path('/usr/share/doc')/name,name)
+   notices+=found
  elif system=='windows':
   unix_path=output(['cygpath','-u',library]).strip()
   package=output(['pacman','-Qqo',unix_path]).strip()
