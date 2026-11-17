@@ -45,6 +45,12 @@ with tempfile.TemporaryDirectory(prefix='tinypdf-source-') as directory:
                    cwd=application, env=env, check=True)
     installed = application / 'vendor/tinymvc/tinypdf'
     assert not (installed / 'vendor').exists() and not (installed / 'tests').exists()
+    ext = '.zip' if os.name == 'nt' else '.tar.gz'
+    matching = sorted([p for p in (ROOT / 'dist').glob(f'tinypdf-text-{VERSION}-*{ext}') if not p.name.endswith('.sha256')], reverse=True)
+    if not matching:
+        matching = sorted([p for p in (ROOT / 'dist').glob(f'tinypdf-text-*{ext}') if not p.name.endswith('.sha256')], reverse=True)
+    if matching:
+        env['TINYPDF_PREBUILT_PATH'] = str(matching[0])
     subprocess.run([PHP, 'vendor/bin/tinypdf-install.php'], cwd=application, env=env, check=True)
     subprocess.run([PHP, 'vendor/bin/tinypdf-check.php'], cwd=application, env=env, check=True)
     subprocess.run([PHP, 'bin/tinypdf-check.php'], cwd=installed, env=env, check=True)

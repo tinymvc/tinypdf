@@ -8,7 +8,7 @@ parser=argparse.ArgumentParser();parser.add_argument('--binary',type=pathlib.Pat
 system=platform.system().lower();arch={'aarch64':'arm64','x86_64':'x64','amd64':'x64'}.get(platform.machine().lower(),platform.machine().lower())
 bundle_name=f'tinypdf-text-{args.version}-{system}-{arch}'
 folder=args.output/bundle_name
-if folder.exists():raise SystemExit(f'Package already exists: {folder}')
+if folder.exists():shutil.rmtree(folder)
 (folder/'bin').mkdir(parents=True);(folder/'lib').mkdir();(folder/'licenses').mkdir()
 helper=folder/'bin'/(args.binary.name+'.bin' if system=='linux' else args.binary.name);shutil.copy2(args.binary,helper)
 def output(command):return subprocess.check_output(command,text=True)

@@ -81,9 +81,9 @@ jobs:
           python tests/unicode_conformance.py
           python tests/rendering.py
           php tests/benchmark.php > tests/performance.json
-          python tests/source_archive.py
           python native/package.py
           python tests/package.py "$(find dist -name '*.tar.gz' -type f | head -1)"
+          python tests/source_archive.py
       - name: Verify Linux distribution compatibility
         if: runner.os == 'Linux' && matrix.php == '8.4'
         run: python tests/linux_compatibility.py

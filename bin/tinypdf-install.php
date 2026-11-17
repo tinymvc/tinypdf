@@ -126,45 +126,67 @@ function installPrebuilt(string $root, string $version): bool
     $bundleName = "tinypdf-text-{$version}-{$os}-{$arch}";
     $filename = "$bundleName.$ext";
 
-    $repo = 'tinymvc/tinypdf';
-    $url = "https://github.com/{$repo}/releases/download/v{$version}/{$filename}";
+    $localBundle = getenv('TINYPDF_PREBUILT_PATH') ?: null;
+    if ($localBundle && !file_exists($localBundle)) {
+        $localBundle = null;
+    }
 
-    echo "Downloading prebuilt TinyPDF native helper ({$os}-{$arch}) from GitHub Releases...\n";
-    $tempArchive = tempnam(sys_get_temp_dir(), 'tinypdf-pkg-') . '.' . $ext;
-
-    $downloadSuccess = false;
-    $context = stream_context_create([
-        'http' => [
-            'method' => 'GET',
-            'timeout' => 90,
-            'follow_location' => 1,
-            'max_redirects' => 10,
-            'user_agent' => "TinyPDF/{$version} binary installer",
-        ],
-        'ssl' => [
-            'verify_peer' => true,
-            'verify_peer_name' => true,
-        ],
-    ]);
-
-    $data = @file_get_contents($url, false, $context);
-    if ($data !== false && strlen($data) > 1000) {
-        file_put_contents($tempArchive, $data);
-        $downloadSuccess = true;
-    } elseif (function_exists('exec')) {
-        @exec('curl -sSL -A "TinyPDF-installer" ' . escapeshellarg($url) . ' -o ' . escapeshellarg($tempArchive), $out, $code);
-        if ($code === 0 && file_exists($tempArchive) && filesize($tempArchive) > 1000) {
-            $downloadSuccess = true;
+    if (!$localBundle) {
+        foreach ([$root . '/dist/' . $filename, dirname($root, 2) . '/dist/' . $filename, dirname($root, 3) . '/dist/' . $filename] as $candidate) {
+            if (file_exists($candidate)) {
+                $localBundle = $candidate;
+                break;
+            }
         }
     }
 
-    if (!$downloadSuccess) {
-        if (file_exists($tempArchive)) {
-            @unlink($tempArchive);
+    $isLocalArchive = false;
+    if ($localBundle) {
+        echo "Installing prebuilt TinyPDF native helper ({$os}-{$arch}) from local bundle: {$localBundle}\n";
+        $tempArchive = $localBundle;
+        $isLocalArchive = true;
+        $downloadSuccess = true;
+    } else {
+        $repo = 'tinymvc/tinypdf';
+        $url = "https://github.com/{$repo}/releases/download/v{$version}/{$filename}";
+
+        echo "Downloading prebuilt TinyPDF native helper ({$os}-{$arch}) from GitHub Releases...\n";
+        $tempArchive = tempnam(sys_get_temp_dir(), 'tinypdf-pkg-') . '.' . $ext;
+
+        $downloadSuccess = false;
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'timeout' => 90,
+                'follow_location' => 1,
+                'max_redirects' => 10,
+                'user_agent' => "TinyPDF/{$version} binary installer",
+            ],
+            'ssl' => [
+                'verify_peer' => true,
+                'verify_peer_name' => true,
+            ],
+        ]);
+
+        $data = @file_get_contents($url, false, $context);
+        if ($data !== false && strlen($data) > 1000) {
+            file_put_contents($tempArchive, $data);
+            $downloadSuccess = true;
+        } elseif (function_exists('exec')) {
+            @exec('curl -sSL -A "TinyPDF-installer" ' . escapeshellarg($url) . ' -o ' . escapeshellarg($tempArchive), $out, $code);
+            if ($code === 0 && file_exists($tempArchive) && filesize($tempArchive) > 1000) {
+                $downloadSuccess = true;
+            }
         }
 
-        echo "Prebuilt release binary is not yet available at {$url}.\n";
-        return false;
+        if (!$downloadSuccess) {
+            if (file_exists($tempArchive)) {
+                @unlink($tempArchive);
+            }
+
+            echo "Prebuilt release binary is not yet available at {$url}.\n";
+            return false;
+        }
     }
 
     echo "Extracting prebuilt binary bundle...\n";
@@ -204,6 +226,14 @@ function installPrebuilt(string $root, string $version): bool
 
         // Find extracted bundle root (usually $tempExtract/$bundleName)
         $bundleDir = is_dir("$tempExtract/$bundleName") ? "$tempExtract/$bundleName" : $tempExtract;
+        if (!is_dir("$bundleDir/bin")) {
+            foreach (scandir($tempExtract) as $item) {
+                if ($item !== '.' && $item !== '..' && is_dir("$tempExtract/$item/bin")) {
+                    $bundleDir = "$tempExtract/$item";
+                    break;
+                }
+            }
+        }
         $binDir = "$root/bin";
         $libDir = "$root/lib";
 
@@ -248,7 +278,7 @@ function installPrebuilt(string $root, string $version): bool
         echo "✓ Successfully installed prebuilt TinyPDF native helper.\n";
         return true;
     } finally {
-        if (file_exists($tempArchive)) {
+        if (!$isLocalArchive && file_exists($tempArchive)) {
             @unlink($tempArchive);
         }
         cleanDir($tempExtract);
