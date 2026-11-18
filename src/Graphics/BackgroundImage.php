@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spark\Pdf\Graphics;
 
+use Spark\Pdf\Css\Length;
 use function count;
 use function sprintf;
 
@@ -108,7 +109,7 @@ final class BackgroundImage
             return [$this->natW * $scale, $this->natH * $scale];
         }
 
-        $parts = preg_split('/\s+/', $s) ?: [];
+        $parts = preg_split('/\s+(?![^(]*\))/', $s) ?: [];
         $wSpec = $parts[0] ?? 'auto';
         $hSpec = $parts[1] ?? 'auto';
 
@@ -133,29 +134,36 @@ final class BackgroundImage
         if ($v === 'auto' || $v === '') {
             return null;
         }
-        if (str_ends_with($v, '%')) {
-            return ((float) $v / 100) * $base;
-        }
-        if (preg_match('/^(-?[\d.]+)(px|pt|mm|cm|in)?$/', $v, $m)) {
-            $n = (float) $m[1];
-            return match ($m[2] ?? 'px') {
-                'pt' => $n,
-                'mm' => $n * (72 / 25.4),
-                'cm' => $n * (72 / 2.54),
-                'in' => $n * 72,
-                default => $n * 0.75, // px to pt
-            };
-        }
-        return null;
+        $length = Length::parse($v, 12.0, 12.0, $base, $base);
+        return $length === null ? null : Length::resolve($length, $base);
     }
 
     /**
      * @return array{0: float, 1: float}
      */
-    private function calculatePosition(float $boxX, float $boxY, float $boxW, float $boxH, float $imgW, float $imgH): array
+    public function calculatePosition(float $boxX, float $boxY, float $boxW, float $boxH, float $imgW, float $imgH): array
     {
         $pos = strtolower(trim($this->position));
-        $tokens = preg_split('/\s+/', $pos) ?: [];
+        $tokens = preg_split('/\s+(?![^(]*\))/', $pos) ?: [];
+
+        if (count($tokens) >= 3) {
+            $coordinates = [$boxX + ($boxW - $imgW) / 2, $boxY + ($boxH - $imgH) / 2];
+            for ($i = 0; $i < count($tokens); $i++) {
+                $edge = $tokens[$i];
+                if (!in_array($edge, ['left', 'right', 'top', 'bottom'], true))
+                    continue;
+                $horizontal = $edge === 'left' || $edge === 'right';
+                $span = $horizontal ? $boxW - $imgW : $boxH - $imgH;
+                $offset = isset($tokens[$i + 1]) ? $this->resolveLength($tokens[$i + 1], $span, 0) : null;
+                if ($offset !== null)
+                    $i++;
+                $coordinates[$horizontal ? 0 : 1] = ($horizontal ? $boxX : $boxY)
+                    + (in_array($edge, ['right', 'bottom'], true) ? $span - ($offset ?? 0) : ($offset ?? 0));
+            }
+            return $coordinates;
+        }
+        if (count($tokens) === 2 && (in_array($tokens[0], ['top', 'bottom'], true) || in_array($tokens[1], ['left', 'right'], true)))
+            $tokens = array_reverse($tokens);
 
         $hVal = 'left';
         $vVal = 'top';
@@ -183,10 +191,7 @@ final class BackgroundImage
             if ($val === 'right' || $val === 'bottom') {
                 return $boxStart + ($boxSpan - $imgSpan);
             }
-            if (str_ends_with($val, '%')) {
-                return $boxStart + ($boxSpan - $imgSpan) * ((float) $val / 100);
-            }
-            $len = $this->resolveLength($val, $boxSpan, $imgSpan) ?? 0.0;
+            $len = $this->resolveLength($val, $boxSpan - $imgSpan, $imgSpan) ?? 0.0;
             return $boxStart + $len;
         };
 

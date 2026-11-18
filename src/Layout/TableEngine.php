@@ -40,13 +40,25 @@ final class TableEngine
                 continue;
             $tag = strtolower($node->tagName);
             if ($tag === 'colgroup') {
+                $groupStyle = $computeStyle($node, $tableStyle);
+                $hasColumns = false;
                 foreach ($node->childNodes as $col) {
                     if ($col instanceof DOMElement && strtolower($col->tagName) === 'col') {
-                        $colStyles[] = $computeStyle($col, $tableStyle);
+                        $hasColumns = true;
+                        $columnStyle = $computeStyle($col, $groupStyle);
+                        $columnStyle['width'] ??= $groupStyle['width'];
+                        for ($i = 0, $span = min(1000, max(1, (int) $col->getAttribute('span'))); $i < $span; $i++)
+                            $colStyles[] = $columnStyle;
                     }
                 }
+                if (!$hasColumns) {
+                    for ($i = 0, $span = min(1000, max(1, (int) $node->getAttribute('span'))); $i < $span; $i++)
+                        $colStyles[] = $groupStyle;
+                }
             } elseif ($tag === 'col') {
-                $colStyles[] = $computeStyle($node, $tableStyle);
+                $columnStyle = $computeStyle($node, $tableStyle);
+                for ($i = 0, $span = min(1000, max(1, (int) $node->getAttribute('span'))); $i < $span; $i++)
+                    $colStyles[] = $columnStyle;
             }
         }
 
@@ -164,7 +176,41 @@ final class TableEngine
             'colCount' => $maxCols,
             'headRows' => $headRows,
             'footRows' => $footRows,
+            'columns' => $colStyles,
         ];
+    }
+
+    public static function fixedWidths(array $grid, float $width, float $spacing, callable $resolve): array
+    {
+        $count = $grid['colCount'];
+        $available = max(0.0, $width - $spacing * ($count + 1));
+        $widths = array_fill(0, $count, null);
+        foreach ($grid['columns'] as $index => $column) {
+            if ($index < $count && $column['width'] !== null)
+                $widths[$index] = max(0.0, $resolve($column['width'], $width));
+        }
+        foreach ($grid['rows'][0]['cells'] as $cell) {
+            $style = $cell['s'];
+            if ($style['width'] === null)
+                continue;
+            $target = $resolve($style['width'], $width);
+            if ($style['sizing'] !== 'border') {
+                $target += $resolve($style['padding'][1], $width) + $resolve($style['padding'][3], $width)
+                    + $style['border'][1]['w'] + $style['border'][3]['w'];
+            }
+            $indices = range($cell['col'], $cell['col'] + $cell['colspan'] - 1);
+            $unset = array_filter($indices, static fn(int $index): bool => $widths[$index] === null);
+            $known = array_sum(array_map(static fn(int $index): float => $widths[$index] ?? 0.0, $indices));
+            foreach ($unset as $index)
+                $widths[$index] = max(0.0, ($target - $known - $spacing * ($cell['colspan'] - 1)) / count($unset));
+        }
+        $remaining = max(0.0, $available - array_sum($widths));
+        $unset = count(array_filter($widths, static fn(?float $value): bool => $value === null));
+        $extra = $remaining / max(1, $unset ?: $count);
+        foreach ($widths as &$value)
+            $value = $value === null ? $extra : $value + ($unset === 0 ? $extra : 0.0);
+        unset($value);
+        return $widths;
     }
 
     /**

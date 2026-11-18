@@ -170,9 +170,16 @@ final class FontManager
             }
             $logical = $line['text'];
             foreach (array_reverse($spans) as $span) {
-                if (!isset($span['style']['object']) || $span['start'] < $line['start'] || $span['start'] >= $line['end']) continue;
                 $object = $items[$span['item']];
-                $replacement = $object['t'] === 'inline-box' ? $object['el']->textContent : '';
+                if (($object['s']['visibility'] ?? 'visible') !== 'visible' && $object['t'] !== 'inline-box') {
+                    $start = max($span['start'], $line['start']);
+                    $end = min($span['end'], $line['end']);
+                    if ($end > $start)
+                        $logical = substr_replace($logical, '', $start - $line['start'], $end - $start);
+                    continue;
+                }
+                if (!isset($span['style']['object']) || $span['start'] < $line['start'] || $span['start'] >= $line['end']) continue;
+                $replacement = $object['t'] === 'inline-box' ? ($object['logicalText'] ?? $object['el']->textContent) : ($object['alt'] ?? '');
                 $logical = substr_replace($logical, $replacement, $span['start'] - $line['start'], 3);
             }
             $lines[] = ['items' => $output, 'w' => $line['width'], 'hard' => $line['hard'],

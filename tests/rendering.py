@@ -64,6 +64,34 @@ def difference(a, b):
     return sum(abs(x - y) for x, y in zip(a.samples, b.samples)) / ink
 
 
+def verify_css(poppler, extractor):
+    path = OUT / 'tinypdf-1.2.2-css.pdf'
+    run(['php', ROOT / 'tests/css_specimen.php', path])
+    fonts = inspect_fonts(PdfReader(path, strict=True))
+    with pymupdf.open(path) as document, pypdfium2.PdfDocument(path) as pdfium:
+        assert len(document) == len(pdfium) == 1, 'CSS specimen must fit on one page'
+        texts = [document[0].get_text(), pdfium[0].get_textpage().get_text_bounded(),
+                 run([extractor, '-enc', 'UTF-8', path, '-']).decode()]
+        for index, text in enumerate(texts):
+            text = canonical(text, poppler=index == 2)
+            for expected in ['বাংলা ভাষায় নির্ভুল নথি', 'مرحبا بالعالم', '😀 👍🏽', 'Wrapped row', 'VIII. Explicit item value']:
+                assert canonical(expected) in text, f'CSS specimen lost text: {expected}'
+            assert 'HIDDEN_TEXT' not in text, 'Invisible text leaked into extraction'
+            assert canonical('This third line') not in text, 'Fully clipped text must not be emitted'
+        raster = document[0].get_pixmap(colorspace=pymupdf.csRGB, alpha=False)
+        raster.save(OUT / 'css-1.png')
+        bitmap = pdfium[0].render(scale=1, rev_byteorder=True)
+        other = pymupdf.Pixmap(pymupdf.csRGB, bitmap.width, bitmap.height, bytes(bitmap.buffer), False)
+        pdfium_error = difference(raster, other)
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = pathlib.Path(directory) / 'css'
+            run([poppler, '-r', '72', '-png', '-singlefile', path, prefix])
+            poppler_error = difference(raster, pymupdf.Pixmap(str(prefix) + '.png'))
+        assert pdfium_error < .65 and poppler_error < .65, 'CSS rendering differs across engines'
+        assert not pymupdf.TOOLS.mupdf_warnings(), 'PDF reader reported a problem in the CSS specimen'
+    return dict(pages=1, embedded_fonts=fonts, pdfium_error=round(pdfium_error, 4), poppler_error=round(poppler_error, 4))
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     poppler = shutil.which('pdftoppm')
@@ -111,6 +139,7 @@ def main():
         mupdf.close()
         pdfium.close()
         report['documents'][name] = document
+    report['documents']['css'] = verify_css(poppler, extractor)
     report['extraction'] = verify_extraction(OUT / 'tinypdf-1.1.0-extraction.pdf')
     (OUT / 'rendering-results.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
     print(json.dumps(report, ensure_ascii=False, indent=2))

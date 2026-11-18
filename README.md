@@ -164,25 +164,25 @@ COLR/CPAL, CBDT/CBLC, sbix and OpenType-SVG glyphs are rendered as transparent 6
 
 | Area | Implemented | Limits |
 |---|---|---|
-| HTML | Headings, paragraphs, sections, lists, inline text, links, tables, images, inline SVG | No JavaScript, canvas, interactive forms or external stylesheets |
-| Cascade | Embedded and inline CSS; class, id and tag selectors (including Unicode class names); descendant and child selectors; `:root`, `:first-child`, `:last-child`, `:nth-child`; `!important` | No attribute or sibling selectors, pseudo-elements, selector functions or CSS nesting |
+| HTML | Headings, paragraphs, sections, lists (Roman/alphabetic, reversed, start/value, inside/outside), inline text, links, tables, images, inline SVG | No JavaScript, canvas or interactive forms |
+| Cascade | Embedded, inline and linked CSS; recursive `@import`; class/id/tag/attribute selectors; descendant/child/sibling combinators; structural child/type selectors, `:is()`, `:where()`, `:not()`, `:lang()`; `!important` | No pseudo-elements, `:has()` or CSS nesting; remote stylesheets require `allowRemote` |
 | Print CSS | `@page` size and margins; plain `@media print`, `all` and `only print`; `<style media="print">` | No conditional media features, named pages, margin boxes or `@supports` |
-| Theme values | Inherited custom properties, `var()` with fallbacks | No registered custom properties or `calc()` |
+| Theme values | Inherited custom properties, `var()` with fallbacks; numeric `calc()`, `min()`, `max()`, `clamp()` lengths | No registered custom properties or full CSS typed arithmetic |
 | Typography | Font family, size, weight and style; common `font` shorthand; alignment; underline and strike; transforms; spacing; `line-height` | Requires suitable registered fonts |
 | Wrapping | Unicode and dictionary line breaks; `pre`, `pre-wrap`, `pre-line`, `nowrap`; `word-break`; `overflow-wrap`; locale-specific `line-break` | Unbreakable words may overflow; no automatic hyphenation |
-| Boxes | Margins, padding, width, height, min/max width, min-height, border-box, solid/dashed/dotted borders, one uniform border radius | No floats, grid, shadows, gradients, clipping or scrolling overflow, or arbitrary transforms; `max-height` applies to images only |
-| Flex | Single row or column, grow ratios, shrinking, alignment, justification, gap; wrapping content measured at allocated widths | No `flex-wrap`, full `flex-basis` or min-content algorithm; a flex item cannot span pages, so keep flex groups shorter than a page |
-| Inline boxes | Padded badges and inline-blocks with backgrounds, borders and baseline alignment | Decorated spans are indivisible and do not fragment across lines |
-| Tables | Auto and explicit column widths, `colspan`/`rowspan`, ordered sections, repeating `thead`, unequal row heights | Rows and connected rowspan groups must fit on a page; no splitting of oversized rows, no repeating `tfoot`, incomplete collapsed-border conflict resolution |
+| Boxes | Margins, padding, min/max dimensions, definite-parent percentage heights, aspect ratios, border-box; solid/dashed/dotted/double and shaded borders; uniform radius; visibility, overflow hidden/clip, display contents | No floats, grid, shadows, gradients, scrolling overflow or arbitrary transforms; shaded border corners are square |
+| Flex | Rows/columns and reverse directions, wrapping, grow/shrink/basis, order, alignment, justification, row/column gaps; content remeasured at allocated widths | No full browser min-content/freezing algorithm or baseline alignment; flex groups cannot span pages, so keep them shorter than a page |
+| Inline boxes | Padded badges, inline-blocks and inline-flex with backgrounds, borders and baseline alignment | Decorated spans are indivisible and do not fragment across lines |
+| Tables | Auto/fixed layout, column/group spans, `colspan`/`rowspan`, top/bottom captions, ordered sections, repeating `thead`, unequal row heights | Rows and connected rowspan groups must fit on a page; no splitting of oversized rows, no repeating `tfoot`, incomplete collapsed-border conflict resolution |
 | Pagination | Automatic text and table breaks, `break-before/after`, basic `break-inside: avoid`, headers and footers | No widows or orphans; reserve enough margin for headers and footers |
-| Positioning | Basic absolute positioning; relative elements establish containing blocks | Relative offsets are not applied; fixed elements do not repeat per page (use the header/footer APIs) |
+| Positioning | Basic absolute positioning; block relative offsets and containing blocks | Inline relative offsets are unsupported; fixed elements do not repeat per page (use the header/footer APIs) |
 | Color | Hex, common named colors, RGB/HSL, background and text alpha, basic element opacity | No compositing groups or blend modes; opacity on nested groups is approximate |
-| Images | JPEG, PNG alpha, GIF, WebP, data URIs, SVG images, `max-width`/`max-height`, rounded image clipping | No animation, `object-fit` or automatic downsampling |
-| Backgrounds | Images, `cover`/`contain`, repeat, position, rounded clipping, page watermarks | Single image layer; no gradients or multiple backgrounds |
+| Images | JPEG, PNG alpha, GIF, WebP, data URIs, SVG images, borders/padding/backgrounds, min/max dimensions, aspect ratios, `object-fit`/`object-position`, missing-image alt text, rounded clipping | No animation, `srcset`/`picture` selection or automatic downsampling |
+| Backgrounds | Images, shorthand position/size, `cover`/`contain`, repeat, edge offsets, rounded clipping, page watermarks | Single image layer; no gradients or multiple backgrounds |
 | SVG | Lines, polygons, rectangles, circles, ellipses, cubic/quadratic/arc paths, basic transforms, `viewBox` | No text, gradients, filters, masks, `use`/`defs`, full styling or complete `preserveAspectRatio` |
 | PDF features | External links, internal block anchors, flat heading bookmarks, metadata, compressed streams | No PDF/A, PDF/UA, tagging, signatures, encryption or fillable forms |
 
-**Units.** Lengths accept `px`, `pt`, `mm`, `cm`, `in`, `em`, `rem` and percentages where the property supports them. One CSS pixel equals 0.75 PDF points. Numeric constructor margins and custom page sizes are in **millimetres**.
+**Units.** Lengths accept `px`, `pt`, `mm`, `cm`, `in`, `pc`, `q`, `em`, `rem`, `vw`, `vh`, `vmin`, `vmax` and percentages where the property supports them. One CSS pixel equals 0.75 PDF points. Numeric constructor margins and custom page sizes are in **millimetres**.
 
 Unknown CSS declarations are generally ignored.
 

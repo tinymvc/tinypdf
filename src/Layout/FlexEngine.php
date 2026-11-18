@@ -4,199 +4,123 @@ declare(strict_types=1);
 
 namespace Spark\Pdf\Layout;
 
-use DOMElement;
-use function count;
-use function is_string;
-
-/**
- * Modern CSS Flexbox layout engine.
- * Computes coordinate frames for children in row/column flow with alignment, justification, and gap.
- */
 final class FlexEngine
 {
-    /**
-     * Lays out flex children and returns their assigned box geometry.
-     *
-     * @param list<array{el: DOMElement, s: array, naturalW: float, naturalH: float}> $items
-     * @param float $containerX Container content X
-     * @param float $containerY Container content Y
-     * @param float $containerW Container content width
-     * @param array $containerStyle Computed CSS of the flex container
-     * @return array{items: list<array{el: DOMElement, s: array, x: float, y: float, w: float, h: float}>, totalH: float}
-     */
-    public static function layout(
-        array $items,
-        float $containerX,
-        float $containerY,
-        float $containerW,
-        array $containerStyle
-    ): array {
-        if (empty($items)) {
+    public static function layout(array $items, float $containerX, float $containerY, float $containerW, array $style): array
+    {
+        if (!$items)
             return ['items' => [], 'totalH' => 0.0];
+        usort($items, static fn(array $a, array $b): int => ($a['s']['order'] ?? 0) <=> ($b['s']['order'] ?? 0));
+        $direction = $style['flex-direction'] ?? 'row';
+        $row = !str_starts_with($direction, 'column');
+        $reverse = str_ends_with($direction, 'reverse');
+        $wrap = $style['flex-wrap'] ?? 'nowrap';
+        $height = $style['contentHeight'] ?? null;
+        $mainSize = $row ? $containerW : $height;
+        $crossSize = $row ? $height : $containerW;
+        $mainGap = (float) ($style[$row ? 'column-gap' : 'row-gap'] ?? $style['gap'] ?? 0.0);
+        $crossGap = (float) ($style[$row ? 'row-gap' : 'column-gap'] ?? $style['gap'] ?? 0.0);
+        $mainKey = $row ? 'naturalW' : 'naturalH';
+        $crossKey = $row ? 'naturalH' : 'naturalW';
+        $lines = [];
+        $line = [];
+        $used = 0.0;
+        foreach ($items as $item) {
+            $basis = $item['basis'] ?? $item[$mainKey];
+            if ($line && $wrap !== 'nowrap' && $mainSize !== null && $used + $mainGap + $basis > $mainSize + .001) {
+                $lines[] = $line;
+                $line = [];
+                $used = 0.0;
+            }
+            $used += ($line ? $mainGap : 0.0) + $basis;
+            $line[] = $item;
         }
-
-        $dir = $containerStyle['flex-direction'] ?? 'row';
-        $isRow = !str_starts_with($dir, 'column');
-        $isReverse = str_ends_with($dir, 'reverse');
-        $justify = $containerStyle['justify-content'] ?? 'flex-start';
-        $align = $containerStyle['align-items'] ?? 'stretch';
-        $gap = (float) ($containerStyle['gap'] ?? 0.0);
-
-        if ($isReverse) {
-            $items = array_reverse($items);
+        $lines[] = $line;
+        $crossSizes = array_map(static fn(array $line): float => max(array_column($line, $crossKey)), $lines);
+        $crossUsed = array_sum($crossSizes) + $crossGap * (count($lines) - 1);
+        $crossExtent = $crossSize ?? $crossUsed;
+        $crossFree = max(0.0, ($crossSize ?? $crossUsed) - $crossUsed);
+        $alignContent = $style['align-content'] ?? 'stretch';
+        if ($alignContent === 'stretch' || ($wrap === 'nowrap' && count($lines) === 1)) {
+            foreach ($crossSizes as &$size)
+                $size += $crossFree / count($lines);
+            unset($size);
+            $crossFree = 0.0;
         }
-
-        return $isRow
-            ? self::layoutRow($items, $containerX, $containerY, $containerW, $justify, $align, $gap)
-            : self::layoutColumn($items, $containerX, $containerY, $containerW, $justify, $align, $gap);
+        [$crossOffset, $crossGap] = self::spacing($alignContent, $crossFree, count($lines), $crossGap);
+        $result = [];
+        $totalMain = 0.0;
+        foreach ($lines as $lineIndex => $line) {
+            if ($reverse)
+                $line = array_reverse($line);
+            $available = $mainSize ?? (array_sum(array_map(static fn(array $item): float => $item['basis'] ?? $item[$mainKey], $line)) + $mainGap * (count($line) - 1));
+            $sizes = self::sizes($line, max(0.0, $available - $mainGap * (count($line) - 1)), $mainKey);
+            $mainUsed = array_sum($sizes) + $mainGap * (count($line) - 1);
+            $justify = $style['justify-content'] ?? 'flex-start';
+            if ($reverse)
+                $justify = match ($justify) { 'flex-start' => 'flex-end', 'flex-end' => 'flex-start', default => $justify };
+            [$mainOffset, $gap] = self::spacing($justify, max(0.0, $available - $mainUsed), count($line), $mainGap);
+            foreach ($line as $index => $item) {
+                $align = $item['s']['align-self'] ?? 'auto';
+                if ($align === 'auto')
+                    $align = $style['align-items'] ?? 'stretch';
+                $stretch = $align === 'stretch' && ($item['s'][$row ? 'height' : 'width'] ?? null) === null;
+                $cross = $stretch ? $crossSizes[$lineIndex] : $item[$crossKey];
+                $offset = match ($align) {
+                    'center' => ($crossSizes[$lineIndex] - $cross) / 2,
+                    'flex-end', 'end' => $crossSizes[$lineIndex] - $cross,
+                    default => 0.0,
+                };
+                $crossPosition = $wrap === 'wrap-reverse'
+                    ? $crossExtent - $crossOffset - $offset - $cross
+                    : $crossOffset + $offset;
+                $result[] = [
+                    'el' => $item['el'],
+                    's' => $item['s'],
+                    'x' => $containerX + ($row ? $mainOffset : $crossPosition),
+                    'y' => $containerY + ($row ? $crossPosition : $mainOffset),
+                    'w' => $row ? $sizes[$index] : $cross,
+                    'h' => $row ? $cross : $sizes[$index],
+                    'stretch' => $stretch,
+                ];
+                $mainOffset += $sizes[$index] + $gap;
+            }
+            $totalMain = max($totalMain, $available, $mainUsed);
+            $crossOffset += $crossSizes[$lineIndex] + $crossGap;
+        }
+        return ['items' => $result, 'totalH' => $row ? $crossOffset - $crossGap : $totalMain];
     }
 
-    private static function layoutRow(
-        array $items,
-        float $cx,
-        float $cy,
-        float $cw,
-        string $justify,
-        string $align,
-        float $gap
-    ): array {
-        $count = count($items);
-        $totalGap = max(0, $count - 1) * $gap;
-        $availW = max(0.0, $cw - $totalGap);
-
-        // Calculate flexible vs fixed widths
-        $totalFlex = 0.0;
-        $usedFixedW = 0.0;
-        $itemWidths = [];
-
-        foreach ($items as $i => $item) {
-            $flex = (float) ($item['s']['flex'] ?? ($item['s']['flex-grow'] ?? 0.0));
-            if ($flex > 0) {
-                $totalFlex += $flex;
-            } elseif ($item['s']['width'] !== null) {
-                $w = $item['naturalW'];
-                $itemWidths[$i] = $w;
-                $usedFixedW += $w;
-            } else {
-                $itemWidths[$i] = $item['naturalW'];
-                $usedFixedW += $item['naturalW'];
-            }
+    private static function sizes(array $items, float $available, string $key): array
+    {
+        $sizes = [];
+        $grow = [];
+        $shrink = [];
+        foreach ($items as $index => $item) {
+            $sizes[$index] = max(0.0, $item['basis'] ?? $item[$key]);
+            $grow[$index] = max(0.0, (float) ($item['s']['flex-grow'] ?? $item['s']['flex'] ?? 0.0));
+            $shrink[$index] = max(0.0, (float) ($item['s']['flex-shrink'] ?? 1.0)) * $sizes[$index];
         }
-
-        // Allocate remaining width to flex items
-        $freeW = max(0.0, $availW - $usedFixedW);
-        foreach ($items as $i => $item) {
-            $flex = (float) ($item['s']['flex'] ?? ($item['s']['flex-grow'] ?? 0.0));
-            if ($flex > 0) {
-                $itemWidths[$i] = $totalFlex > 0 ? ($flex / $totalFlex) * $freeW : 0.0;
-            }
+        $free = $available - array_sum($sizes);
+        $weights = $free >= 0 ? $grow : $shrink;
+        $weight = array_sum($weights);
+        if ($weight > 0) {
+            foreach ($sizes as $index => &$size)
+                $size = max(0.0, $size + $free * $weights[$index] / $weight);
+            unset($size);
         }
-
-        $totalWidth = array_sum($itemWidths);
-        if ($totalWidth > $availW && $totalWidth > 0) {
-            foreach ($itemWidths as $i => $width) {
-                $itemWidths[$i] = $width * $availW / $totalWidth;
-            }
-        }
-
-        $rowW = array_sum($itemWidths) + $totalGap;
-        $maxH = max(array_column($items, 'naturalH'));
-
-        // Justification offset
-        $remainW = max(0.0, $cw - $rowW);
-        $startX = $cx;
-        $spaceGap = $gap;
-
-        switch ($justify) {
-            case 'flex-end':
-            case 'right':
-                $startX = $cx + $remainW;
-                break;
-            case 'center':
-                $startX = $cx + $remainW / 2;
-                break;
-            case 'space-between':
-                if ($count > 1) {
-                    $spaceGap = $gap + ($remainW / ($count - 1));
-                }
-                break;
-            case 'space-around':
-                $spaceGap = $gap + ($remainW / $count);
-                $startX = $cx + ($remainW / $count) / 2;
-                break;
-            case 'space-evenly':
-                $spaceGap = $gap + ($remainW / ($count + 1));
-                $startX = $cx + ($remainW / ($count + 1));
-                break;
-        }
-
-        $curX = $startX;
-        $result = [];
-
-        foreach ($items as $i => $item) {
-            $w = $itemWidths[$i];
-            $h = $align === 'stretch' ? $maxH : $item['naturalH'];
-            $y = $cy;
-
-            if ($align === 'center') {
-                $y = $cy + ($maxH - $h) / 2;
-            } elseif ($align === 'flex-end') {
-                $y = $cy + ($maxH - $h);
-            }
-
-            $result[] = [
-                'el' => $item['el'],
-                's' => $item['s'],
-                'x' => $curX,
-                'y' => $y,
-                'w' => $w,
-                'h' => $h,
-            ];
-
-            $curX += $w + $spaceGap;
-        }
-
-        return ['items' => $result, 'totalH' => $maxH];
+        return $sizes;
     }
 
-    private static function layoutColumn(
-        array $items,
-        float $cx,
-        float $cy,
-        float $cw,
-        string $justify,
-        string $align,
-        float $gap
-    ): array {
-        $curY = $cy;
-        $result = [];
-        $count = count($items);
-
-        foreach ($items as $idx => $item) {
-            $w = $item['s']['width'] !== null
-                ? $item['naturalW']
-                : ($align === 'stretch' ? $cw : $item['naturalW']);
-
-            $x = $cx;
-            if ($align === 'center') {
-                $x = $cx + ($cw - $w) / 2;
-            } elseif ($align === 'flex-end') {
-                $x = $cx + ($cw - $w);
-            }
-
-            $h = $item['naturalH'];
-            $result[] = [
-                'el' => $item['el'],
-                's' => $item['s'],
-                'x' => $x,
-                'y' => $curY,
-                'w' => $w,
-                'h' => $h,
-            ];
-
-            $curY += $h + ($idx + 1 < $count ? $gap : 0.0);
-        }
-
-        return ['items' => $result, 'totalH' => max(0.0, $curY - $cy)];
+    private static function spacing(string $alignment, float $free, int $count, float $gap): array
+    {
+        return match ($alignment) {
+            'flex-end', 'end', 'right' => [$free, $gap],
+            'center' => [$free / 2, $gap],
+            'space-between' => [0.0, $count > 1 ? $gap + $free / ($count - 1) : $gap],
+            'space-around' => [$free / $count / 2, $gap + $free / $count],
+            'space-evenly' => [$free / ($count + 1), $gap + $free / ($count + 1)],
+            default => [0.0, $gap],
+        };
     }
 }
