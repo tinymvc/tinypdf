@@ -568,6 +568,10 @@ final class HtmlPdf
 
     public function save(string $path): void
     {
+        $dir = dirname($path);
+        if (!is_dir($dir) && $dir !== '' && $dir !== '.') {
+            @mkdir($dir, 0755, true);
+        }
         if (file_put_contents($path, $this->output()) === false) {
             throw new RuntimeException("Cannot write PDF to $path");
         }

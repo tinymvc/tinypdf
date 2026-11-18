@@ -41,7 +41,7 @@ final class Stylesheet
         }, $css) ?? '';
         return preg_replace_callback('~url\(\s*([\'"]?)(.*?)\1\s*\)~i', static function (array $match) use ($base): string {
             $source = self::resolve(trim($match[2]), $base);
-            return 'url("' . str_replace(['\\', '"'], ['\\\\', '\\"'], $source) . '")';
+            return 'url("' . str_replace('"', '\\"', $source) . '")';
         }, $css) ?? '';
     }
 

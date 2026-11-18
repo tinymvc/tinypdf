@@ -20,7 +20,7 @@ function cssSupportStyles(HtmlPdf $pdf): array
 
 test('CSS selector attributes, sibling combinators and structural functions match correctly', function () {
     $doc = new DOMDocument();
-    $doc->loadHTML('<main><p id="first"></p><span></span><p id="target" data-label="A B" class="chosen"></p><p></p></main>');
+    $doc->loadHTML('<main><p id="first"></p><span></span><p id="target" data-label="A B" class="chosen"></p><p></p></main>', LIBXML_NOERROR | LIBXML_NOWARNING);
     $target = $doc->getElementById('target');
     foreach (['span + p', '#first ~ p[data-label="a b" i]', 'p:nth-of-type(2)', 'p:nth-last-child(2)', ':is(.chosen, #other):not(:first-child)', ':where(main) > p.chosen'] as $selector)
         check(Selector::matches($target, Selector::parse($selector)), 'Must match ' . $selector);
@@ -93,7 +93,9 @@ test('Object fit retains the bordered image box and fits or crops its contents',
     ob_start();
     imagepng($bitmap);
     $source = 'data:image/png;base64,' . base64_encode(ob_get_clean());
-    imagedestroy($bitmap);
+    if (PHP_VERSION_ID < 80500) {
+        @imagedestroy($bitmap);
+    }
     foreach (['contain' => '100 0 0 50 2 ', 'cover' => '200 0 0 100 -48 ', 'none' => '15 0 0 7.5 44.5 ', 'scale-down' => '15 0 0 7.5 44.5 '] as $fit => $matrix) {
         $pdf = (new HtmlPdf(margin: 0))->addHtml('<img src="' . $source . '" style="display:block;width:100pt;height:100pt;border:2pt solid blue;object-fit:' . $fit . '">')->output();
         $stream = getDecompressedStreams($pdf);
