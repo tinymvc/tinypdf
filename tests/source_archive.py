@@ -14,7 +14,7 @@ PHP = shutil.which('php') or 'php'
 COMPOSER = shutil.which('composer')
 assert COMPOSER, 'Composer is required for the installation check'
 _vm = re.search(r"public const VERSION = '([^']+)';", (ROOT / 'src/HtmlPdf.php').read_text())
-VERSION = _vm[1] if _vm else '1.2.1'
+VERSION = _vm[1] if _vm else '1.2.2'
 with tempfile.TemporaryDirectory(prefix='tinypdf-source-') as directory:
     subprocess.run([COMPOSER, 'archive', '--format=zip', '--dir=' + directory, '--file=tinypdf-' + VERSION], cwd=ROOT, check=True)
     archive = pathlib.Path(directory) / f'tinypdf-{VERSION}.zip'

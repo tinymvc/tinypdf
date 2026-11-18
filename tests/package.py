@@ -14,7 +14,7 @@ import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 _vm = re.search(r"public const VERSION = '([^']+)';", (ROOT / 'src/HtmlPdf.php').read_text())
-VERSION = _vm[1] if _vm else '1.2.1'
+VERSION = _vm[1] if _vm else '1.2.2'
 archive = pathlib.Path(sys.argv[1]).resolve()
 expected = archive.with_suffix(archive.suffix + '.sha256').read_text().split()[0]
 assert hashlib.sha256(archive.read_bytes()).hexdigest() == expected

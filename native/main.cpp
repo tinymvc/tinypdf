@@ -585,7 +585,7 @@ public:
             u_getUnicodeVersion(unicode);
             char unicodeVersion[U_MAX_VERSION_STRING_LENGTH];
             u_versionToString(unicode, unicodeVersion);
-            return {{"version", "1.2.1"}, {"protocol", 1}, {"harfbuzz", hb_version_string()},
+            return {{"version", "1.2.2"}, {"protocol", 1}, {"harfbuzz", hb_version_string()},
                 {"icu", U_ICU_VERSION}, {"fribidi", FRIBIDI_VERSION}, {"unicode", unicodeVersion}, {"maxMessage", MAX_MESSAGE},
                 {"capabilities", {"layout", "bidi", "graphemes", "fallback", "subset", "variations", "vertical", "color"}}};
         }

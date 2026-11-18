@@ -425,3 +425,114 @@ test('Font shorthand and transparent text retain their style', function () {
     check(str_contains(getDecompressedStreams($pdf), '14 Tf'), 'Shorthand must set the font size');
     check(str_contains($pdf, '/ca 0.000'), 'Transparent text must have zero alpha');
 });
+
+test('Image borders and percentage boxes use the containing width', function () {
+    if (!extension_loaded('gd'))
+        skip('GD unavailable');
+    $gif = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    foreach (['inline', 'block'] as $display) {
+        $pdf = (new HtmlPdf(margin: 0))->addHtml('<div style="width:200pt"><img src="' . $gif
+            . '" style="display:' . $display . ';width:50%;height:20pt;margin:10pt;padding:5%;border:1px solid red"></div>')->output();
+        $stream = getDecompressedStreams($pdf);
+        check(str_contains($stream, '100 0 0 20 20.75 '), 'Image width and padding must use the 200pt containing block');
+        same(4, substr_count($stream, '1 0 0 RG 0.75 w'), 'All four direct image borders must be painted');
+    }
+});
+
+test('SVG border-box images retain sizing and links', function () {
+    $svg = '<svg width="160" height="80"><rect width="160" height="80" fill="blue"/></svg>';
+    $source = 'data:image/svg+xml;base64,' . base64_encode($svg);
+    $style = 'width:100pt;height:50pt;box-sizing:border-box;border:2pt solid red;padding:4pt;border-radius:10pt';
+    $pdf = (new HtmlPdf(margin: 0))->addHtml('<a href="https://example.com"><img src="' . $source . '" style="' . $style . '"></a>')->output();
+    $stream = getDecompressedStreams($pdf);
+    check(str_contains($stream, '88.000 38.000 re W n'), 'SVG viewport must exclude padding and border');
+    check(str_contains($stream, '1 0 0 RG 2 w'), 'Rounded SVG border must be painted');
+    check(str_contains($pdf, '/URI (https://example.com)'), 'Linked SVG image must remain clickable');
+});
+
+test('Transparent palette images retain their alpha mask', function () {
+    if (!extension_loaded('gd'))
+        skip('GD unavailable');
+    $gif = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    $pdf = (new HtmlPdf())->addHtml('<div style="background:red"><img src="' . $gif . '" width="30" height="30"></div>')->output();
+    check(str_contains($pdf, '/SMask'), 'Transparent GIF pixels must not turn opaque white');
+});
+
+test('Background and border shorthands reset omitted components', function () {
+    $pdf = (new HtmlPdf())->addHtml('<style>.box { background-color:red; background-image:url(missing.png); border-color:red; }</style>'
+        . '<div class="box" style="width:50pt;height:20pt;color:blue;border:2pt solid;background:none"></div>');
+    $cache = (new ReflectionProperty($pdf, 'styleCache'))->getValue($pdf);
+    $styles = array_values(array_filter($cache, fn($entry) => $entry['el']->getAttribute('class') === 'box'));
+    same(null, $styles[0]['s']['bgImg'], 'Background shorthand must clear a previous image');
+    $stream = getDecompressedStreams($pdf->output());
+    same(4, substr_count($stream, '0 0 1 RG 2 w'), 'Omitted border color must reset to currentColor');
+    check(!str_contains($stream, '1 0 0 rg'), 'Background none must clear the previous red color');
+});
+
+test('Hidden elements disappear and descendant opacity combines', function () {
+    $pdf = (new HtmlPdf())->addHtml('<div hidden>Absent</div><div hidden style="display:block">Restored</div>'
+        . '<div style="opacity:.5"><span style="opacity:.5">Quarter</span></div><p>Opaque</p>')->output();
+    $text = logicalText(getDecompressedStreams($pdf));
+    check(!str_contains($text, 'Absent') && str_contains($text, 'Restored'), 'Hidden attribute must respect explicit CSS display overrides');
+    check(str_contains($pdf, '/ca 0.250'), 'Nested element opacity must multiply');
+    check(str_contains($pdf, '/ca 1.000'), 'Opacity must not leak into the next sibling');
+});
+
+test('Minimum box dimensions override explicit and maximum dimensions', function () {
+    $pdf = (new HtmlPdf())->addHtml('<div style="width:200pt;min-width:150pt;max-width:100pt;height:10pt;min-height:50pt;padding:3pt;border:2pt solid blue;background:red"></div>')->output();
+    check(str_contains(getDecompressedStreams($pdf), '160 60 re f'), 'Minimum content dimensions must include padding and borders');
+});
+
+test('Header footer and block links survive repeated output', function () {
+    $pdf = (new HtmlPdf())
+        ->setHeaderHtml('<a href="https://example.com/header">Header</a>')
+        ->setFooterHtml('<a href="https://example.com/footer">Footer</a>')
+        ->addHtml('<a href="https://example.com/block" style="display:block">Block</a>');
+    foreach ([$pdf->output(), $pdf->output()] as $bytes) {
+        same(3, substr_count($bytes, '/Subtype /Link'), 'Output must preserve each link exactly once');
+        foreach (['header', 'footer', 'block'] as $path)
+            check(str_contains($bytes, '/URI (https://example.com/' . $path . ')'), 'Link destination must be preserved');
+    }
+});
+
+test('Absolute and flex images resolve percentages before allocated sizing', function () {
+    if (!extension_loaded('gd'))
+        skip('GD unavailable');
+    $gif = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    $absolute = (new HtmlPdf(margin: 0))->addHtml('<div style="position:relative;width:200pt;height:80pt"><img src="' . $gif
+        . '" style="position:absolute;right:10pt;top:0;width:50%;height:20pt"></div>')->output();
+    check(str_contains(getDecompressedStreams($absolute), '100 0 0 20 90 '), 'Absolute image must use the containing block for percentage width and right alignment');
+    $flex = (new HtmlPdf(margin: 0))->addHtml('<div style="display:flex;width:200pt"><img src="' . $gif
+        . '" style="width:50%;height:20pt;padding:5%;margin:10pt;border:1pt solid red"></div>')->output();
+    check(str_contains(getDecompressedStreams($flex), '100 0 0 20 21 '), 'Flex image percentage padding must not shrink with its allocation');
+});
+
+test('SVG blocks paginate and automatic heading destinations follow content', function () {
+    $svg = '<svg style="display:block;width:100pt;height:70pt;border:2pt solid red"><rect width="100" height="70"/></svg>';
+    $pdf = (new HtmlPdf([60, 60], margin: 5))->addHtml('<div style="height:110pt">Before</div>' . $svg)->output();
+    check(str_contains($pdf, '/Count 2'), 'SVG blocks must move to the next page when they do not fit');
+    $pdf = (new HtmlPdf([60, 60], margin: 5))->addHtml('<a href="#target">Jump</a><div style="height:100pt"></div><h1 id="target">Target</h1>')->output();
+    preg_match_all('/(\d+) 0 obj\s*<< \/Type \/Page\b/', $pdf, $pages);
+    same(2, count($pages[1]));
+    check(str_contains($pdf, '/Dest [' . $pages[1][1] . ' 0 R'), 'Automatic page breaks must update the anchor destination');
+});
+
+test('Inherited line height keeps lengths fixed and scales unitless values', function () {
+    foreach (['20pt' => 20.0, '2' => 40.0] as $lineHeight => $expected) {
+        $pdf = (new HtmlPdf())->addHtml('<p style="font-size:10pt;line-height:' . $lineHeight
+            . '"><span style="font-size:20pt">First<br>Second</span></p>')->output();
+        $positions = textPositions(getDecompressedStreams($pdf));
+        check(abs($positions[0]['y'] - $positions[1]['y'] - $expected) < .01, 'Inherited line height must follow CSS length versus multiplier semantics');
+    }
+});
+
+test('Hidden document roots stay blank and headers have an independent rem size', function () {
+    foreach (['html', 'body'] as $tag) {
+        $pdf = (new HtmlPdf())->addHtml('<style>' . $tag . '{display:none}</style><p>Absent</p>')->output();
+        check(!str_contains(logicalText(getDecompressedStreams($pdf)), 'Absent'), 'Hidden document roots must hide their descendants');
+    }
+    $pdf = (new HtmlPdf())->setHeaderHtml('<p style="font-size:1rem">Header</p>')
+        ->addHtml('<style>html{font-size:20pt}</style><p>Body</p>')->output();
+    $stream = getDecompressedStreams($pdf);
+    check(str_contains($stream, '10 Tf') && str_contains($stream, '20 Tf'), 'Header rem units must use the header document root size');
+});

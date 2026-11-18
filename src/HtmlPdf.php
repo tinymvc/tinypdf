@@ -39,7 +39,7 @@ use function strlen;
  */
 final class HtmlPdf
 {
-    public const VERSION = '1.2.1';
+    public const VERSION = '1.2.2';
     private const PX = 0.75;          // 1 CSS px in points
     private const MM = 72 / 25.4;     // 1 mm in points
     private const SIDES = ['top', 'right', 'bottom', 'left'];
@@ -186,6 +186,7 @@ final class HtmlPdf
         'italic',
         'align',
         'lh',
+        'lineHeightLength',
         'under',
         'strike',
         'transform',
@@ -294,6 +295,7 @@ final class HtmlPdf
     private array $info = [];
     private array $bookmarks = [];
     private array $anchors = [];
+    private array $pendingDestinations = [];
     private float $rootFontSize;
 
     private FontManager $fontManager;
@@ -440,8 +442,11 @@ final class HtmlPdf
             : $this->rootStyle();
         $this->rootFontSize = $root['size'];
         $style = $this->computeStyle($body, $root);
-        $this->bodyBackground = $style;
+        $visible = $root['display'] !== 'none' && $style['display'] !== 'none';
+        $this->bodyBackground = $visible ? $style : null;
         $this->beginPage($this->pageSize($spec, $orientation ?? $this->orientationSpec));
+        if (!$visible)
+            return $this;
         $style['bg'] = null;
         $style['bgImg'] = null;
 
@@ -748,20 +753,22 @@ final class HtmlPdf
             if ($this->headerHtml !== null && $this->headerHtml !== '' && !($isFirst && $this->excludeHeaderFirstPage)) {
                 $hHtml = str_replace(['{page}', '{pages}'], [(string) ($i + 1), (string) $total], $this->headerHtml);
                 $headerY = max(0.0, ($margin[0] / 2) - 4.0 * self::MM);
-                $ops = $this->renderIsolatedHtml($hHtml, $page['w'], $page['h'], $margin[3], $headerY, $page['w'] - $margin[1] - $margin[3]);
-                if (!empty($ops)) {
-                    array_unshift($page['ops'], ...$ops);
+                $header = $this->renderIsolatedHtml($hHtml, $page['w'], $page['h'], $margin[3], $headerY, $page['w'] - $margin[1] - $margin[3]);
+                if ($header['ops']) {
+                    array_unshift($page['ops'], ...$header['ops']);
                 }
+                $page['annots'] = [...$page['annots'], ...$header['annots']];
             }
 
             // HTML Footer
             if ($this->footerHtml !== null && $this->footerHtml !== '' && !($isFirst && $this->excludeFooterFirstPage)) {
                 $fHtml = str_replace(['{page}', '{pages}'], [(string) ($i + 1), (string) $total], $this->footerHtml);
                 $footerY = $page['h'] - ($margin[2] / 2) - 4.0 * self::MM;
-                $ops = $this->renderIsolatedHtml($fHtml, $page['w'], $page['h'], $margin[3], $footerY, $page['w'] - $margin[1] - $margin[3]);
-                if (!empty($ops)) {
-                    $page['ops'] = [...$page['ops'], ...$ops];
+                $footer = $this->renderIsolatedHtml($fHtml, $page['w'], $page['h'], $margin[3], $footerY, $page['w'] - $margin[1] - $margin[3]);
+                if ($footer['ops']) {
+                    $page['ops'] = [...$page['ops'], ...$footer['ops']];
                 }
+                $page['annots'] = [...$page['annots'], ...$footer['annots']];
             }
         }
         unset($page);
@@ -773,6 +780,7 @@ final class HtmlPdf
         $saved = get_object_vars($this);
 
         $this->ops = [];
+        $this->pageAnnots = [];
         $this->y = $y;
         $this->pageW = $pageW;
         $this->pageH = $pageH;
@@ -783,17 +791,24 @@ final class HtmlPdf
         $this->frames = [];
         $this->listStack = [];
         $this->activeLinks = [];
+        $this->pendingDestinations = [];
         $this->styleCache = [];
 
         try {
             $doc = $this->parse($html);
             $this->rules = $this->collectRules($doc);
+            $this->rootFontSize = $this->fontSize;
+            $root = $doc->documentElement instanceof DOMElement
+                ? $this->computeStyle($doc->documentElement, $this->rootStyle())
+                : $this->rootStyle();
+            $this->rootFontSize = $root['size'];
             $body = $doc->getElementsByTagName('body')->item(0);
             if ($body instanceof DOMElement) {
-                $style = $this->computeStyle($body, $this->rootStyle());
-                $this->renderBox($body, $style, $x, $maxW);
+                $style = $this->computeStyle($body, $root);
+                if ($root['display'] !== 'none' && $style['display'] !== 'none')
+                    $this->renderBox($body, $style, $x, $maxW);
             }
-            return $this->ops;
+            return ['ops' => $this->ops, 'annots' => $this->pageAnnots];
         } finally {
             // Keep resources discovered in the header, but restore document layout state.
             unset($saved['fontManager'], $saved['graphicState'], $saved['images'], $saved['imageCache']);
@@ -1070,6 +1085,7 @@ final class HtmlPdf
             'italic' => false,
             'align' => 'start',
             'lh' => null,
+            'lineHeightLength' => null,
             'under' => false,
             'strike' => false,
             'transform' => 'none',
@@ -1089,7 +1105,7 @@ final class HtmlPdf
         $tag = $this->tag($el);
         $s = array_intersect_key($parent, array_flip(self::INHERITED)) + self::RESET;
         $s['display'] = self::TABLE_DISPLAY[$tag] ?? (in_array($tag, self::BLOCK_TAGS, true) ? 'block' : 'inline');
-        if (in_array($tag, self::HIDDEN_TAGS, true)) {
+        if (in_array($tag, self::HIDDEN_TAGS, true) || $el->hasAttribute('hidden')) {
             $s['display'] = 'none';
         }
         if (in_array($tag, ['tr', 'thead', 'tbody', 'tfoot', 'td', 'th'], true)) {
@@ -1131,6 +1147,9 @@ final class HtmlPdf
         }
         $decl = $this->normalize($decl);
         $this->apply($s, $decl, $parent);
+        if ($s['lineHeightLength'] !== null && $s['size'] > 0)
+            $s['lh'] = $s['lineHeightLength'] / $s['size'];
+        $s['opacity'] *= $parent['opacity'];
 
         $this->styleCache[$key] = ['el' => $el, 's' => $s];
         return $s;
@@ -1307,12 +1326,15 @@ final class HtmlPdf
                     foreach ($name === 'border' ? self::SIDES : [substr($name, 7)] as $side) {
                         $out["border-$side-width"] = $w;
                         $out["border-$side-style"] = $style;
-                        if ($color !== null) {
-                            $out["border-$side-color"] = $color;
-                        }
+                        $out["border-$side-color"] = $color ?? 'currentcolor';
                     }
                     break;
                 case 'background':
+                    $out['background-color'] = 'transparent';
+                    $out['background-image'] = 'none';
+                    $out['background-repeat'] = 'repeat';
+                    $out['background-position'] = '0% 0%';
+                    $out['background-size'] = 'auto';
                     if (preg_match('/url\(([\'"]?)(.*?)\1\)/i', $value, $m)) {
                         $out['background-image'] = $m[2];
                     }
@@ -1419,6 +1441,7 @@ final class HtmlPdf
                     break;
                 case 'line-height':
                     $s['lh'] = $this->lineHeight($l, $fs);
+                    $s['lineHeightLength'] = is_numeric($l) || $s['lh'] === null ? null : $s['lh'] * $fs;
                     break;
                 case 'list-style':
                 case 'list-style-type':
@@ -1432,7 +1455,7 @@ final class HtmlPdf
                     $s['bg'] = $this->color($value);
                     break;
                 case 'background-image':
-                    $s['bgImg'] = $value;
+                    $s['bgImg'] = $l === 'none' ? null : $value;
                     break;
                 case 'background-repeat':
                     $s['bgRepeat'] = $l;
@@ -1788,6 +1811,7 @@ final class HtmlPdf
                 $node = $anonymous;
                 $cs = array_intersect_key($s, array_flip(self::INHERITED)) + self::RESET;
                 $cs['display'] = 'block';
+                $cs['opacity'] = $s['opacity'];
             } elseif ($node instanceof DOMElement) {
                 $cs = $this->computeStyle($node, $s);
             } else {
@@ -1800,18 +1824,24 @@ final class HtmlPdf
                 continue;
             }
 
+            $cs['padding'] = $this->edges($cs['padding'], $w);
+            $cs['margin'] = $this->edges($cs['margin'], $w);
+            foreach (['width', 'minWidth', 'maxWidth'] as $dimension) {
+                if (is_string($cs[$dimension]))
+                    $cs[$dimension] = $this->px($cs[$dimension], $w);
+            }
             $naturalH = $this->measure(fn() => $this->renderElement($node, $cs, 0.0, $w));
             $naturalW = $cs['width'] !== null ? $this->outerWidth($cs, $w) : $this->maxContent(['el' => $node, 's' => $cs]);
             if ($cs['width'] === null && in_array($this->tag($node), ['img', 'svg'], true)) {
                 $item = $this->tag($node) === 'img' ? $this->imageItem($node, $cs, $w) : $this->svgItem($node, $cs, $w);
                 $naturalW = $item['w'] ?? 0.0;
-            }
-            if ($cs['width'] === null) {
+            } elseif ($cs['width'] === null) {
                 [, $pr, , $pl] = $this->edges($cs['padding'], $w);
-                [, $mr, , $ml] = $this->edges($cs['margin'], $w);
                 [, $br, , $bl] = array_column($cs['border'], 'w');
-                $naturalW += $pl + $pr + $bl + $br + $ml + $mr;
+                $naturalW += $pl + $pr + $bl + $br;
             }
+            [, $mr, , $ml] = $this->edges($cs['margin'], $w);
+            $naturalW += $ml + $mr;
 
             $children[] = [
                 'el' => $node,
@@ -1829,6 +1859,13 @@ final class HtmlPdf
             $i = $childIndices[spl_object_id($item['el'])];
             $childStyle = $item['s'];
             $childStyle['width'] = null;
+            if (in_array($this->tag($item['el']), ['img', 'svg'], true)) {
+                [, $mr, , $ml] = $this->edges($childStyle['margin'], $w);
+                [, $pr, , $pl] = $this->edges($childStyle['padding'], $w);
+                [, $br, , $bl] = array_column($childStyle['border'], 'w');
+                $extra = $childStyle['sizing'] === 'border' ? 0.0 : $pl + $pr + $bl + $br;
+                $childStyle['width'] = max(0.0, $item['w'] - $ml - $mr - $extra);
+            }
             $children[$i]['naturalH'] = $this->measure(fn() => $this->renderElement($item['el'], $childStyle, 0.0, $item['w']));
         }
         $layout = FlexEngine::layout($children, $x, $this->y + $this->pending, $w, $s);
@@ -1841,6 +1878,7 @@ final class HtmlPdf
         }
         $this->settle();
 
+        $this->placeDestinations();
         foreach ($layout['items'] as $it) {
             $savedY = $this->y;
             $savedPending = $this->pending;
@@ -1848,7 +1886,15 @@ final class HtmlPdf
             $this->pending = 0.0;
             $childStyle = $it['s'];
             $childStyle['width'] = null;
-            if ($s['align-items'] === 'stretch' && !str_starts_with($s['flex-direction'], 'column')) {
+            $isImage = in_array($this->tag($it['el']), ['img', 'svg'], true);
+            if ($isImage) {
+                [, $mr, , $ml] = $this->edges($childStyle['margin'], $w);
+                [, $pr, , $pl] = $this->edges($childStyle['padding'], $w);
+                [, $br, , $bl] = array_column($childStyle['border'], 'w');
+                $extra = $childStyle['sizing'] === 'border' ? 0.0 : $pl + $pr + $bl + $br;
+                $childStyle['width'] = max(0.0, $it['w'] - $ml - $mr - $extra);
+            }
+            if (!$isImage && $s['align-items'] === 'stretch' && !str_starts_with($s['flex-direction'], 'column')) {
                 $childStyle['minHeight'] = $it['h'];
                 $childStyle['sizing'] = 'border';
             }
@@ -1871,6 +1917,11 @@ final class HtmlPdf
 
         $tag = $this->tag($el);
 
+        $isLink = $tag === 'a' && $el->hasAttribute('href');
+        if ($isLink)
+            $this->activeLinks[] = $el->getAttribute('href');
+
+        $destination = [];
         // Record anchor for internal page links
         if ($el->hasAttribute('id') && !$this->measuring) {
             $id = $el->getAttribute('id');
@@ -1878,6 +1929,7 @@ final class HtmlPdf
                 'page' => count($this->pages),
                 'y' => max(0.0, $this->pageH - ($this->y + $this->pending)),
             ];
+            $destination['anchor'] = $id;
         }
 
         // Automatic PDF bookmarks for h1-h6 headings
@@ -1885,13 +1937,17 @@ final class HtmlPdf
             $hText = trim($el->textContent);
             if ($hText !== '') {
                 $this->addBookmark($hText, (int) $hm[1]);
+                $destination['bookmark'] = array_key_last($this->bookmarks);
             }
         }
+        $destinationIndex = null;
+        if ($destination) {
+            $this->pendingDestinations[] = $destination;
+            $destinationIndex = array_key_last($this->pendingDestinations);
+        }
 
-        if ($tag === 'img') {
+        if ($tag === 'img' || $tag === 'svg') {
             $this->renderImageBlock($el, $s, $x, $w);
-        } elseif ($tag === 'svg') {
-            $this->renderSvgBlock($el, $s, $x, $w);
         } else {
             if (!$s['breakInside'] && $this->allowBreak) {
                 $height = $this->measure(fn() => $this->renderElement($el, $s, $x, $w));
@@ -1905,14 +1961,30 @@ final class HtmlPdf
         if ($s['breakAfter']) {
             $this->forcePageBreak();
         }
+        if ($isLink)
+            array_pop($this->activeLinks);
+        if ($destinationIndex !== null)
+            unset($this->pendingDestinations[$destinationIndex]);
+    }
+
+    private function placeDestinations(): void
+    {
+        if ($this->measuring || !$this->pendingDestinations)
+            return;
+        $position = ['page' => count($this->pages), 'y' => max(0.0, $this->pageH - $this->y)];
+        foreach ($this->pendingDestinations as $destination) {
+            if (isset($destination['anchor']))
+                $this->anchors[$destination['anchor']] = $position;
+            if (isset($destination['bookmark']))
+                $this->bookmarks[$destination['bookmark']] = array_replace($this->bookmarks[$destination['bookmark']], $position);
+        }
+        $this->pendingDestinations = [];
     }
 
     private function renderElement(DOMElement $el, array $s, float $x, float $w): void
     {
-        if ($this->tag($el) === 'img') {
+        if (in_array($this->tag($el), ['img', 'svg'], true)) {
             $this->renderImageBlock($el, $s, $x, $w);
-        } elseif ($this->tag($el) === 'svg') {
-            $this->renderSvgBlock($el, $s, $x, $w);
         } elseif ($s['display'] === 'table' && $this->tag($el) === 'table') {
             $this->renderTable($el, $s, $x, $w);
         } else {
@@ -1939,11 +2011,11 @@ final class HtmlPdf
             $cw = max(0.0, $w - $ml - $mr - $extra);
         }
 
-        if ($s['minWidth'] !== null) {
-            $cw = max($cw, $this->px($s['minWidth'], $w) - ($s['sizing'] === 'border' ? $extra : 0.0));
-        }
         if ($s['maxWidth'] !== null) {
             $cw = max(0.0, min($cw, $this->px($s['maxWidth'], $w) - ($s['sizing'] === 'border' ? $extra : 0.0)));
+        }
+        if ($s['minWidth'] !== null) {
+            $cw = max($cw, $this->px($s['minWidth'], $w) - ($s['sizing'] === 'border' ? $extra : 0.0));
         }
         if ($s['mAutoL'] || $s['mAutoR']) {
             $free = max(0.0, $w - $cw - $extra - ($s['mAutoL'] ? 0 : $ml) - ($s['mAutoR'] ? 0 : $mr));
@@ -1957,8 +2029,10 @@ final class HtmlPdf
         }
 
         $vertical = $pt + $pb + $bt + $bb;
-        $hb = is_float($s['height']) ? $s['height'] + ($s['sizing'] === 'border' ? 0.0 : $vertical) : null;
-        $minHb = is_float($s['minHeight']) ? $s['minHeight'] + ($s['sizing'] === 'border' ? 0.0 : $vertical) : null;
+        $hb = is_float($s['height']) ? max($vertical, $s['height'] + ($s['sizing'] === 'border' ? 0.0 : $vertical)) : null;
+        $minHb = is_float($s['minHeight']) ? max($vertical, $s['minHeight'] + ($s['sizing'] === 'border' ? 0.0 : $vertical)) : null;
+        if ($hb !== null)
+            $hb = max($hb, $minHb ?? 0.0);
 
         $this->pending = max($this->pending, $mt);
         $i = count($this->frames);
@@ -2107,7 +2181,13 @@ final class HtmlPdf
         $s2 = $s;
         $s2['margin'] = [0.0, 0.0, 0.0, 0.0];
         $s2['mAutoL'] = $s2['mAutoR'] = false;
-        $isImage = $this->tag($el) === 'img';
+        $s2['padding'] = $this->edges($s2['padding'], $cb['w']);
+        foreach (['width', 'minWidth', 'maxWidth'] as $dimension) {
+            if (is_string($s2[$dimension]))
+                $s2[$dimension] = $this->px($s2[$dimension], $cb['w']);
+        }
+        $tag = $this->tag($el);
+        $isImage = $tag === 'img' || $tag === 'svg';
 
         $bx = $cb['x'];
         $pw = $cb['w'];
@@ -2129,9 +2209,13 @@ final class HtmlPdf
             $pw = max($pw, $this->outerWidth($s2, $cb['w']));
         }
 
-        $item = $isImage ? $this->imageItem($el, $s, $pw) : null;
+        $item = null;
+        if ($isImage)
+            $item = $tag === 'svg' ? $this->svgItem($el, $s2, $pw) : $this->imageItem($el, $s2, $pw);
         if ($isImage && $item === null)
             return;
+        if ($item !== null && $left === null && $right !== null)
+            $bx = $cb['x'] + $cb['w'] - $right - $item['w'];
 
         if ($top !== null) {
             $by = $cb['y'] + $top;
@@ -2419,6 +2503,7 @@ final class HtmlPdf
             }
         }
 
+        $this->placeDestinations();
         $top = $this->y;
         $rowX = $grid['x'] + $spacing;
         $rowW = array_sum($grid['cols']) + $spacing * (count($grid['cols']) - 1);
@@ -2455,14 +2540,13 @@ final class HtmlPdf
             $items[] = ['t' => 'br', 'w' => 0.0, 's' => $s, 'k' => 'br'];
             return;
         }
-        if ($tag === 'img') {
-            if ($item = $this->imageItem($el, $s, $w)) {
-                $items[] = $item;
-            }
-            return;
-        }
-        if ($tag === 'svg') {
-            if ($item = $this->svgItem($el, $s, $w)) {
+        if ($tag === 'img' || $tag === 'svg') {
+            $margin = $this->edges($s['margin'], $w);
+            $item = $tag === 'img' ? $this->imageItem($el, $s, $w) : $this->svgItem($el, $s, $w);
+            if ($item !== null) {
+                $item['margin'] = $margin;
+                $item['w'] += $margin[1] + $margin[3];
+                $item['h'] += $margin[0] + $margin[2];
                 $items[] = $item;
             }
             return;
@@ -2659,6 +2743,7 @@ final class HtmlPdf
         if ($this->allowBreak && $this->y + $height > $this->pageBottom + 0.01 && $this->y > $this->pageTop + 0.01) {
             $this->newPage();
         }
+        $this->placeDestinations();
         $base = $this->y + $ascent;
         $this->extent = max($this->extent, $x + $line['w']);
 
@@ -2694,15 +2779,10 @@ final class HtmlPdf
                 $spaceCount += (int) $glyph['space'];
             $itemW = $it['w'] + $spaceCount * $extra;
 
-            if ($it['t'] === 'img') {
+            if ($it['t'] === 'img' || $it['t'] === 'svg') {
                 $this->flushRun($run, $base);
                 $run = null;
                 $this->ops[] = $this->imageOp($it, $cx, $base - $it['h']);
-            } elseif ($it['t'] === 'svg') {
-                $this->flushRun($run, $base);
-                $run = null;
-                $svg = SvgRenderer::render($it['el'], $cx, $base - $it['h'], $it['w'], $it['h'], $this->pageH);
-                $this->ops[] = $svg['ops'];
             } elseif ($it['t'] === 'inline-box') {
                 $this->flushRun($run, $base);
                 $run = null;
@@ -2799,22 +2879,7 @@ final class HtmlPdf
     private function renderImageBlock(DOMElement $el, array $s, float $x, float $w): void
     {
         [$mt, $mr, $mb, $ml] = $this->edges($s['margin'], $w);
-        $src = $el->getAttribute('src');
-
-        // Check if SVG image
-        if (str_ends_with(strtolower($src), '.svg') || str_starts_with($src, 'data:image/svg+xml')) {
-            $svgContent = $this->readSource($src);
-            if ($svgContent !== null) {
-                $rendered = SvgRenderer::render($svgContent, $x + $ml, $this->y + $this->pending + $mt, $s['width'] !== null ? $this->px($s['width'], $w) : null, is_float($s['height']) ? $s['height'] : null, $this->pageH);
-                $this->pending = max($this->pending, $mt);
-                $this->ops[] = $rendered['ops'];
-                $this->y += $rendered['h'];
-                $this->pending = max($this->pending, $mb);
-                return;
-            }
-        }
-
-        $item = $this->imageItem($el, $s, max(1.0, $w - $ml - $mr));
+        $item = $this->tag($el) === 'svg' ? $this->svgItem($el, $s, $w) : $this->imageItem($el, $s, $w);
         if ($item === null)
             return;
         $align = $s['mAutoL'] && $s['mAutoR'] ? 'center' : ($s['mAutoL'] ? 'right' : 'left');
@@ -2824,25 +2889,10 @@ final class HtmlPdf
         $this->pending = max($this->pending, $mb);
     }
 
-    private function renderSvgBlock(DOMElement $el, array $s, float $x, float $w): void
+    private function svgItem(string|DOMElement $el, array $s, float $w): ?array
     {
-        [$mt, $mr, $mb, $ml] = $this->edges($s['margin'], $w);
-        $tw = $s['width'] !== null ? $this->px($s['width'], $w) : null;
-        $th = is_float($s['height']) ? $s['height'] : null;
-
-        $rendered = SvgRenderer::render($el, $x + $ml, $this->y + $this->pending + $mt, $tw, $th, $this->pageH);
-        $this->pending = max($this->pending, $mt);
-        $this->ops[] = $rendered['ops'];
-        $this->y += $rendered['h'];
-        $this->pending = max($this->pending, $mb);
-    }
-
-    private function svgItem(DOMElement $el, array $s, float $w): ?array
-    {
-        $tw = $s['width'] !== null ? $this->px($s['width'], $w) : null;
-        $th = is_float($s['height']) ? $s['height'] : null;
-        $rendered = SvgRenderer::render($el, 0, 0, $tw, $th, $this->pageH);
-        return ['t' => 'svg', 'w' => $rendered['w'], 'h' => $rendered['h'], 'el' => $el, 's' => $s, 'k' => 'svg'];
+        $rendered = SvgRenderer::render($el, 0, 0, null, null, $this->pageH);
+        return $this->imageBox(['t' => 'svg', 'el' => $el, 'k' => 'svg'], $s, $w, $rendered['w'], $rendered['h']);
     }
 
     private function imageItem(DOMElement $el, array $s, float $w): ?array
@@ -2852,18 +2902,26 @@ final class HtmlPdf
             $svg = $this->readSource($source);
             if ($svg === null)
                 return null;
-            $width = $s['width'] === null ? null : $this->px($s['width'], $w);
-            $height = is_float($s['height']) ? $s['height'] : null;
-            $rendered = SvgRenderer::render($svg, 0, 0, $width, $height, $this->pageH);
-            return ['t' => 'svg', 'el' => $svg, 'w' => $rendered['w'], 'h' => $rendered['h'], 's' => $s, 'k' => 'svg'];
+            return $this->svgItem($svg, $s, $w);
         }
         $img = $this->loadImage($el->getAttribute('src'));
         if ($img === null)
             return null;
-        $natW = $img['w'] * self::PX;
-        $natH = $img['h'] * self::PX;
-        $tw = $s['width'] === null ? null : $this->px($s['width'], $w);
-        $th = is_float($s['height']) ? $s['height'] : null;
+        return $this->imageBox(['t' => 'img', 'res' => $img['name'], 'k' => 'img'], $s, $w, $img['w'] * self::PX, $img['h'] * self::PX);
+    }
+
+    private function imageBox(array $item, array $s, float $w, float $natW, float $natH): ?array
+    {
+        if ($natW <= 0 || $natH <= 0)
+            return null;
+        [$pt, $pr, $pb, $pl] = $this->edges($s['padding'], $w);
+        [$bt, $br, $bb, $bl] = array_column($s['border'], 'w');
+        $horizontal = $pl + $pr + $bl + $br;
+        $vertical = $pt + $pb + $bt + $bb;
+        $widthExtra = $s['sizing'] === 'border' ? $horizontal : 0.0;
+        $heightExtra = $s['sizing'] === 'border' ? $vertical : 0.0;
+        $tw = $s['width'] === null ? null : max(0.0, $this->px($s['width'], $w) - $widthExtra);
+        $th = is_float($s['height']) ? max(0.0, $s['height'] - $heightExtra) : null;
 
         if ($tw !== null && $th === null) {
             $th = $tw * $natH / $natW;
@@ -2872,22 +2930,35 @@ final class HtmlPdf
         } elseif ($tw === null) {
             [$tw, $th] = [$natW, $natH];
         }
-        if ($tw > $w && $w > 0) {
-            $th *= $w / $tw;
-            $tw = $w;
+        $maxWidth = $s['maxWidth'] === null ? INF : max(0.0, $this->px($s['maxWidth'], $w) - $widthExtra);
+        if ($s['width'] === null) {
+            [, $mr, , $ml] = $this->edges($s['margin'], $w);
+            $maxWidth = min($maxWidth, max(0.0, $w - $horizontal - $ml - $mr));
         }
-        if ($s['maxWidth'] !== null && $tw > $this->px($s['maxWidth'], $w)) {
-            $maxWidth = max(0.0, $this->px($s['maxWidth'], $w));
-            $th *= $maxWidth / $tw;
-            $tw = $maxWidth;
-        }
-        if (is_float($s['maxHeight']) && $th > $s['maxHeight']) {
-            $tw *= max(0.0, $s['maxHeight']) / $th;
-            $th = max(0.0, $s['maxHeight']);
-        }
-        $radius = is_string($s['radius']) ? (float) $s['radius'] / 100 * min($tw, $th) : (float) $s['radius'];
+        $minWidth = $s['minWidth'] === null ? 0.0 : max(0.0, $this->px($s['minWidth'], $w) - $widthExtra);
+        $width = max($minWidth, min($tw, $maxWidth));
+        if (!is_float($s['height']) && $tw > 0)
+            $th *= $width / $tw;
+        $tw = $width;
+        $maxHeight = is_float($s['maxHeight']) ? max(0.0, $s['maxHeight'] - $heightExtra) : INF;
+        $minHeight = is_float($s['minHeight']) ? max(0.0, $s['minHeight'] - $heightExtra) : 0.0;
+        $height = max($minHeight, min($th, $maxHeight));
+        if ($s['width'] === null && $th > 0)
+            $tw *= $height / $th;
+        $th = $height;
 
-        return ['t' => 'img', 'w' => $tw, 'h' => $th, 'res' => $img['name'], 'r' => $radius, 's' => $s, 'k' => 'img'];
+        return $item + [
+            'w' => $tw + $horizontal,
+            'h' => $th + $vertical,
+            'contentW' => $tw,
+            'contentH' => $th,
+            'boxW' => $tw + $horizontal,
+            'boxH' => $th + $vertical,
+            'dx' => $pl + $bl,
+            'dy' => $pt + $bt,
+            's' => $s,
+            'link' => $this->activeLinks ? end($this->activeLinks) : null,
+        ];
     }
 
     private function loadImage(string $src): ?array
@@ -2937,7 +3008,7 @@ final class HtmlPdf
         $im = imagecreatetruecolor($width, $height);
         imagealphablending($im, false);
         imagesavealpha($im, true);
-        imagefill($im, 0, 0, imagecolorallocatealpha($im, 255, 255, 255, 0));
+        imagefill($im, 0, 0, imagecolorallocatealpha($im, 255, 255, 255, 127));
         imagecopy($im, $src, 0, 0, 0, 0, $width, $height);
 
         $rgb = '';
@@ -3133,19 +3204,53 @@ final class HtmlPdf
 
     private function imageOp(array $item, float $x, float $top): string
     {
-        if ($item['t'] === 'svg') {
-            return SvgRenderer::render($item['el'], $x, $top, $item['w'], $item['h'], $this->pageH)['ops'];
+        $s = $item['s'];
+        $x += $item['margin'][3] ?? 0.0;
+        $top += $item['margin'][0] ?? 0.0;
+        $width = $item['boxW'];
+        $height = $item['boxH'];
+        $radius = is_string($s['radius']) ? (float) $s['radius'] / 100 * min($width, $height) : (float) $s['radius'];
+        $out = $this->boxOps($x, $top, $width, $height, ['border' => self::RESET['border']] + $s);
+        if ($s['bgImg'] !== null && ($background = $this->loadImage($s['bgImg'])) !== null) {
+            $bg = new BackgroundImage(
+                $background['name'],
+                $background['w'] * self::PX,
+                $background['h'] * self::PX,
+                $s['bgRepeat'],
+                $s['bgPos'],
+                $s['bgSize'],
+                $s['opacity']
+            );
+            $out .= $bg->render($x, $top, $width, $height, $radius, $this->pageH, $this->graphicState);
         }
-        $clip = $item['r'] > 0 ? $this->roundRect($x, $top, $item['w'], $item['h'], $item['r']) . ' W n ' : '';
-        return sprintf(
-            "q %s%s 0 0 %s %s %s cm /%s Do Q\n",
-            $clip,
-            $this->n($item['w']),
-            $this->n($item['h']),
-            $this->n($x),
-            $this->n($this->pageH - $top - $item['h']),
-            $item['res'],
-        );
+        if ($item['contentW'] > 0 && $item['contentH'] > 0) {
+            $contentX = $x + $item['dx'];
+            $contentY = $top + $item['dy'];
+            $state = $this->graphicState->getAlphaState($s['opacity'], $s['opacity']);
+            $out .= "q /$state gs\n";
+            if ($radius > 0) {
+                $contentRadius = max(0.0, $radius - max($item['dx'], $item['dy']));
+                $out .= $this->roundRect($contentX, $contentY, $item['contentW'], $item['contentH'], $contentRadius) . " W n\n";
+            }
+            if ($item['t'] === 'svg') {
+                $out .= SvgRenderer::render($item['el'], $contentX, $contentY, $item['contentW'], $item['contentH'], $this->pageH)['ops'];
+            } else {
+                $out .= sprintf(
+                    "%s 0 0 %s %s %s cm /%s Do\n",
+                    $this->n($item['contentW']),
+                    $this->n($item['contentH']),
+                    $this->n($contentX),
+                    $this->n($this->pageH - $contentY - $item['contentH']),
+                    $item['res']
+                );
+            }
+            $out .= "Q\n";
+        }
+        $out .= $this->boxOps($x, $top, $width, $height, ['bg' => null] + $s);
+        if (!empty($item['link']) && !$this->measuring) {
+            $this->pageAnnots[] = ['rect' => [$x, $top, $width, $height], 'url' => $item['link']];
+        }
+        return $out;
     }
 
     private function actualTextStart(string $text): string
@@ -3319,11 +3424,8 @@ final class HtmlPdf
                     if (!empty($item['link']) && !$this->measuring) {
                         $this->pageAnnots[] = ['rect' => [$cx - $column / 2, $cy, $column, $item['w']], 'url' => $item['link']];
                     }
-                } elseif ($item['t'] === 'img') {
+                } elseif ($item['t'] === 'img' || $item['t'] === 'svg') {
                     $this->ops[] = $this->imageOp($item, $cx - $item['w'] / 2, $cy);
-                } elseif ($item['t'] === 'svg') {
-                    $svg = SvgRenderer::render($item['el'], $cx - $item['w'] / 2, $cy, $item['w'], $item['h'], $this->pageH);
-                    $this->ops[] = $svg['ops'];
                 } elseif ($item['t'] === 'inline-box') {
                     $saved = [$this->y, $this->pending, $this->allowBreak];
                     $this->y = $cy;
